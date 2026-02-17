@@ -1,10 +1,22 @@
 # TerrariaModder
 
-A modding framework for Terraria 1.4.5.
+A lightweight modding framework for Terraria 1.4.5. No tModLoader required.
 
 ## Download
 
-Get the latest release from [Nexus Mods](https://www.nexusmods.com/profile/Inidar/mods), or follow build instructions below. Extract to your Terraria folder and run `TerrariaInjector.exe`.
+Get the latest release from [Nexus Mods](https://www.nexusmods.com/terraria/mods/135), or follow build instructions below. Extract to your Terraria folder and run `TerrariaInjector.exe`.
+
+## Create Your Own Mods
+
+TerrariaModder is built to be modder-friendly. Everything you need to get started:
+
+- **[Wiki & Guides](https://inidar1.github.io/terraria-modder/)** — Installation, first mod tutorial, Harmony basics, API reference, and walkthroughs of every included mod
+- **[Starter Template](templates/ModTemplate)** — Ready-to-build mod template so you can have a working mod in minutes
+- **Example Mods** — Every mod in this repo is open source with full source code. Use them as reference for real-world patterns
+- **Built-in UI Library** — Panels, buttons, sliders, text fields, scrollable lists, tabs, and automatic colorblind support
+- **Automatic Config UI** — Define config fields and the mod menu generates the settings UI for you
+
+A GUI mod manager app is coming soon.
 
 ## Included Mods
 
@@ -46,17 +58,14 @@ Each mod builds to a single DLL. Place them in `Terraria/TerrariaModder/mods/<mo
 
 ## Documentation
 
-See the [Wiki](../../wiki) for guides and reference, or browse the docs directly:
+See the [Wiki](https://inidar1.github.io/terraria-modder/) for guides and reference, or browse the docs directly:
 
 - [Installation Guide](docs/installation.md)
 - [Making Your First Mod](docs/making-your-first-mod.md)
 - [Core API Reference](docs/core-api-reference.md)
+- [Harmony Basics](docs/harmony-basics.md)
 - [Tested Patterns](docs/tested-patterns.md)
 - [Troubleshooting](docs/troubleshooting.md)
-
-## For Mod Developers
-
-See [templates/ModTemplate](templates/ModTemplate) for a starter template.
 
 ## Credits
 

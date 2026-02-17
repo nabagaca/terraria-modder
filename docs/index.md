@@ -1,7 +1,6 @@
 ---
 title: Home
-layout: home
-nav_order: 1
+layout: default
 ---
 
 # TerrariaModder
@@ -83,8 +82,8 @@ Learn by studying real, working mods:
 ## Quick Links
 
 - [Nexus Mods](https://www.nexusmods.com/terraria/users/Inidar?tab=user+files)
-- [GitHub Repository](https://github.com/SixteenthBit/terraria-modder) (source code)
-- [Report Issues](https://github.com/SixteenthBit/terraria-modder/issues)
+- [GitHub Repository](https://github.com/Inidar1/terraria-modder) (source code)
+- [Report Issues](https://github.com/Inidar1/terraria-modder/issues)
 
 ## Credits
 
