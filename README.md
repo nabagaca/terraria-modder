@@ -35,9 +35,9 @@ A GUI mod manager app is coming soon.
 
 **Optional (for mod developers):**
 
-| Mod | Description | Default Key |
-|-----|-------------|-------------|
-| DebugTools | Debug HTTP server, in-game console, virtual input, window management | Ctrl+` |
+| Mod | Description | Default Key | Download |
+|-----|-------------|-------------|----------|
+| DebugTools | Debug HTTP server, in-game console, virtual input, window management | Ctrl+` | [Nexus](https://www.nexusmods.com/terraria/mods/135) (optional file) |
 
 ## Multiplayer
 
