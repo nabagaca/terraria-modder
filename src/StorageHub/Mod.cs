@@ -1,0 +1,433 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
+using TerrariaModder.Core;
+using TerrariaModder.Core.Config;
+using TerrariaModder.Core.Events;
+using TerrariaModder.Core.Logging;
+using TerrariaModder.Core.UI;
+using StorageHub.Config;
+using StorageHub.Storage;
+using StorageHub.Patches;
+using StorageHub.UI;
+using StorageHub.Crafting;
+using StorageHub.Relay;
+using StorageHub.Debug;
+using StorageHub.PaintingChest;
+
+namespace StorageHub
+{
+    /// <summary>
+    /// Storage Hub - Unified storage access, crafting, and item management.
+    ///
+    /// CORE DESIGN PRINCIPLES:
+    ///
+    /// 1. IStorageProvider Abstraction:
+    ///    - Multiplayer requires different access patterns than singleplayer
+    ///    - UI calls interface methods, doesn't know if it's direct access or packets
+    ///    - Built from day one to avoid retrofitting later
+    ///
+    /// 2. Data Safety:
+    ///    - Passive operations (viewing/sorting) = ZERO writes
+    ///    - UI holds ItemSnapshot copies, never references to real items
+    ///    - Active operations (take/craft) are explicit user actions
+    ///
+    /// 3. Progression:
+    ///    - 4 tiers using consumable items (Shadow Scale → Luminite)
+    ///    - Station memory at Tier 3+ (endgame convenience)
+    ///    - Relays extend range without tier upgrade
+    ///
+    /// 4. Chest Registration:
+    ///    - Must manually open chest first (prevents remote looting world-gen chests)
+    ///    - Locked/trapped chests excluded
+    /// </summary>
+    public class Mod : IMod
+    {
+        public string Id => "storage-hub";
+        public string Name => "Storage Hub";
+        public string Version => "1.0.0";
+
+        private ILogger _log;
+        private ModContext _context;
+        private bool _enabled;
+        private bool _paintingChestEnabled;
+
+        // Configuration
+        private StorageHubConfig _hubConfig;
+        private string _modFolder;
+
+        // Core components
+        private ChestRegistry _registry;
+        private IStorageProvider _storageProvider;
+        private ChestOpenDetector _chestDetector;
+
+        // Crafting system
+        private RecipeIndex _recipeIndex;
+        private CraftabilityChecker _craftChecker;
+        private CraftingExecutor _craftExecutor;
+        private RecursiveCrafter _recursiveCrafter;
+
+        // Range/Relay system
+        private RangeCalculator _rangeCalc;
+
+        // UI
+        private StorageHubUI _ui;
+
+        // Debug
+        private DebugDumper _debugDumper;
+        public static DebugDumper Dumper { get; private set; }
+
+        // Reflection for getting world/character names
+        private static Type _mainType;
+        private static FieldInfo _worldNameField;
+        private static FieldInfo _playerArrayField;
+        private static FieldInfo _myPlayerField;
+        private static PropertyInfo _playerNameProp;
+
+        public void Initialize(ModContext context)
+        {
+            _log = context.Logger;
+            _context = context;
+
+            LoadConfig();
+            InitReflection();
+
+            if (!_enabled)
+            {
+                _log.Info("StorageHub is disabled in config");
+                return;
+            }
+
+            // Set up mod folder path (context.ModFolder points to this mod's folder)
+            _modFolder = context.ModFolder;
+
+            // Register keybind
+            context.RegisterKeybind("toggle", "Toggle Storage Hub", "Open/close the Storage Hub UI", "F5", OnToggleUI);
+
+            // Subscribe to frame events (world load/unload handled via IMod interface)
+            FrameEvents.OnPreUpdate += OnUpdate;
+            UIRenderer.RegisterPanelDraw("storage-hub", OnDraw);
+
+            // Initialize painting chest feature
+            _paintingChestEnabled = _context.Config.Get("paintingChest", true);
+            if (_paintingChestEnabled)
+            {
+                PaintingChestManager.Initialize(_log, _context);
+            }
+
+            _log.Info("StorageHub initialized - Press F5 to open");
+        }
+
+        private void LoadConfig()
+        {
+            _enabled = _context.Config.Get<bool>("enabled");
+        }
+
+        private void InitReflection()
+        {
+            try
+            {
+                _mainType = Type.GetType("Terraria.Main, Terraria")
+                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
+
+                if (_mainType != null)
+                {
+                    _worldNameField = _mainType.GetField("worldName", BindingFlags.Public | BindingFlags.Static);
+                    _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
+                    _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
+                }
+
+                var playerType = Type.GetType("Terraria.Player, Terraria")
+                    ?? Assembly.Load("Terraria").GetType("Terraria.Player");
+
+                if (playerType != null)
+                {
+                    _playerNameProp = playerType.GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Reflection init error: {ex.Message}");
+            }
+        }
+
+        private void OnToggleUI()
+        {
+            if (_ui == null) return;
+
+            _ui.Toggle();
+        }
+
+        private void OnUpdate()
+        {
+            // Painting chest deferred patching must tick even when UI disabled
+            if (_paintingChestEnabled)
+                PaintingChestManager.Update();
+
+            if (!_enabled) return;
+
+            // Check for chest opens
+            _chestDetector?.Update();
+
+            // Update UI
+            _ui?.Update();
+        }
+
+        private void OnDraw()
+        {
+            if (!_enabled) return;
+
+            // Draw UI (handles its own visibility check)
+            _ui?.Draw();
+        }
+
+        public void OnWorldLoad()
+        {
+            if (!_enabled) return;
+
+            try
+            {
+                string worldName = GetWorldName();
+                string charName = GetCharacterName();
+
+                // Validate we got actual names, not "Unknown"
+                if (worldName == "Unknown" || charName == "Unknown")
+                {
+                    _log.Warn($"World load with incomplete names: world={worldName}, char={charName}");
+                    _log.Warn("Config may not load correctly - please re-enter world");
+                }
+
+                _log.Info($"World loaded: {worldName}, Character: {charName}");
+
+                // Initialize config
+                _hubConfig = new StorageHubConfig(_log, _modFolder);
+                _hubConfig.Load(worldName, charName);
+
+                // Initialize registry
+                _registry = new ChestRegistry(_log, _hubConfig);
+                _registry.LoadFromConfig();
+                // Wire up save callback so registrations persist immediately (survives force quit)
+                _registry.OnRegistrationChanged = () => _hubConfig.Save();
+
+                // Initialize storage provider
+                _storageProvider = new SingleplayerProvider(_log, _registry, _hubConfig);
+
+                // Initialize chest detector
+                _chestDetector = new ChestOpenDetector(_log, _registry);
+                _chestDetector.Initialize();
+
+                // Initialize crafting system
+                _recipeIndex = new RecipeIndex(_log);
+                if (_recipeIndex.InitReflection())
+                {
+                    _recipeIndex.Build();
+                }
+                _craftChecker = new CraftabilityChecker(_log, _recipeIndex, _storageProvider, _hubConfig);
+                _craftExecutor = new CraftingExecutor(_log, _storageProvider);
+                _recursiveCrafter = new RecursiveCrafter(_log, _recipeIndex, _craftChecker);
+                _recursiveCrafter.SetExecutor(_craftExecutor);
+
+                // Initialize range calculator
+                _rangeCalc = new RangeCalculator(_log, _hubConfig);
+
+                // Initialize debug dumper (clears old dumps)
+                _debugDumper = new DebugDumper(_log, _modFolder);
+                Dumper = _debugDumper;
+
+                // Initialize UI
+                _ui = new StorageHubUI(_log, _storageProvider, _hubConfig, _recipeIndex, _craftChecker, _recursiveCrafter, _rangeCalc, _context.Config);
+
+                // Initialize painting chest
+                if (_paintingChestEnabled)
+                {
+                    PaintingChestManager.OnWorldLoad(_hubConfig);
+                }
+
+                _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
+
+                // Dump initial state
+                _debugDumper.DumpState("WORLD_LOAD");
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"OnWorldLoad error: {ex.Message}");
+            }
+        }
+
+        private object GetLocalPlayer()
+        {
+            try
+            {
+                if (_myPlayerField == null || _playerArrayField == null)
+                    return null;
+
+                var myPlayerVal = _myPlayerField.GetValue(null);
+                if (myPlayerVal == null) return null;
+
+                int myPlayer = (int)myPlayerVal;
+                var players = _playerArrayField.GetValue(null) as Array;
+                if (players == null || myPlayer < 0 || myPlayer >= players.Length)
+                    return null;
+
+                return players.GetValue(myPlayer);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public void OnWorldUnload()
+        {
+            if (!_enabled) return;
+
+            try
+            {
+                // Close UI
+                _ui?.Close();
+
+                // Save config
+                if (_registry != null && _hubConfig != null)
+                {
+                    _registry.SaveToConfig();
+                    _hubConfig.Save();
+                    _log.Info("StorageHub config saved");
+                }
+
+                // Reset detector
+                _chestDetector?.Reset();
+
+                // Write debug session summary
+                _debugDumper?.WriteSessionSummary();
+
+                // Clear singleton and null out references to prevent stale polling between worlds
+                ChestRegistry.ClearInstance();
+                _ui = null;
+                _hubConfig = null;
+                _registry = null;
+                _storageProvider = null;
+                _chestDetector = null;
+                _recipeIndex = null;
+                _craftChecker = null;
+                _craftExecutor = null;
+                _recursiveCrafter = null;
+                _rangeCalc = null;
+                _debugDumper = null;
+                Dumper = null;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"OnWorldUnload error: {ex.Message}");
+            }
+        }
+
+        public void Unload()
+        {
+            FrameEvents.OnPreUpdate -= OnUpdate;
+            UIRenderer.UnregisterPanelDraw("storage-hub");
+
+            // Clean up UI
+            _ui?.Close();
+            _ui = null;
+
+            _hubConfig = null;
+            _registry = null;
+            _storageProvider = null;
+            _chestDetector = null;
+            _recipeIndex = null;
+            _craftChecker = null;
+            _craftExecutor = null;
+            _recursiveCrafter = null;
+            _rangeCalc = null;
+
+            if (_paintingChestEnabled)
+            {
+                PaintingChestManager.Unload();
+            }
+
+            _log.Info("StorageHub unloaded");
+        }
+
+        private string GetWorldName()
+        {
+            try
+            {
+                var worldName = _worldNameField?.GetValue(null) as string;
+                if (string.IsNullOrEmpty(worldName))
+                {
+                    _log.Warn("World name is empty or null");
+                    return "Unknown";
+                }
+                return worldName;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"GetWorldName error: {ex.Message}");
+                return "Unknown";
+            }
+        }
+
+        private string GetCharacterName()
+        {
+            try
+            {
+                if (_myPlayerField == null || _playerArrayField == null)
+                {
+                    _log.Warn("Player reflection fields not initialized");
+                    return "Unknown";
+                }
+
+                var myPlayerVal = _myPlayerField.GetValue(null);
+                if (myPlayerVal == null)
+                {
+                    _log.Warn("myPlayer field is null");
+                    return "Unknown";
+                }
+
+                int myPlayer = (int)myPlayerVal;
+                var players = _playerArrayField.GetValue(null) as Array;
+                if (players == null)
+                {
+                    _log.Warn("Player array is null");
+                    return "Unknown";
+                }
+
+                // Bounds check before array access
+                if (myPlayer < 0 || myPlayer >= players.Length)
+                {
+                    _log.Warn($"myPlayer index {myPlayer} out of bounds (array length: {players.Length})");
+                    return "Unknown";
+                }
+
+                var player = players.GetValue(myPlayer);
+                if (player == null)
+                {
+                    _log.Warn($"Player at index {myPlayer} is null");
+                    return "Unknown";
+                }
+
+                // Try to get name field/property
+                var charName = _playerNameProp?.GetValue(player) as string;
+                if (string.IsNullOrEmpty(charName))
+                {
+                    // Try direct field access as fallback
+                    var nameField = player.GetType().GetField("name", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    charName = nameField?.GetValue(player) as string;
+                }
+
+                if (string.IsNullOrEmpty(charName))
+                {
+                    _log.Warn("Character name is empty or null");
+                    return "Unknown";
+                }
+                return charName;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"GetCharacterName error: {ex.Message}");
+                return "Unknown";
+            }
+        }
+    }
+}
