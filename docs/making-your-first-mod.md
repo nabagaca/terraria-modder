@@ -1,5 +1,6 @@
 ---
-title: Making Your First Mod
+title: How to Make a Terraria 1.4.5 Mod - Beginner Tutorial
+description: Learn how to create a Terraria 1.4.5 mod from scratch using TerrariaModder and Harmony. Step-by-step C# tutorial with project setup, config, keybinds, and UI.
 nav_order: 5
 ---
 

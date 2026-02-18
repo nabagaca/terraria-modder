@@ -1,5 +1,6 @@
 ---
-title: Harmony Basics
+title: Harmony Patching Guide for Terraria 1.4.5
+description: Learn Harmony runtime patching for Terraria 1.4.5 modding. Covers prefix, postfix, and transpiler patches with real examples from working mods.
 nav_order: 6
 ---
 

@@ -1,5 +1,6 @@
 ---
-title: QuickKeys
+title: QuickKeys Mod - Auto-Torch and Hotkeys for Terraria 1.4.5
+description: Walkthrough of the QuickKeys mod for Terraria 1.4.5. Auto-torch, recall, quick-stack, ruler overlay, and extended hotbar using input handling and reflection.
 parent: Walkthroughs
 nav_order: 3
 ---

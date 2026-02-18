@@ -38,4 +38,4 @@ Works in multiplayer.
 Requires TerrariaModder Core.
 
 Extract this zip into your Terraria folder. The mod goes into
-`TerrariaModder/mods/auto-furniture-buffs/`.
+`TerrariaModder/mods/auto-buffs/`.

@@ -395,10 +395,20 @@ namespace StorageHub.UI
         private void DrawHeader(int x, int y)
         {
             UIRenderer.DrawRect(x, y, PanelWidth, HeaderHeight, UIColors.HeaderBg);
-            UIRenderer.DrawTextShadow("Storage Hub", x + 10, y + 8, UIColors.TextTitle);
+
+            // Draw mod icon
+            TerrariaModder.Core.PluginLoader.LoadModIcons();
+            var icon = TerrariaModder.Core.PluginLoader.GetMod("storage-hub")?.IconTexture ?? TerrariaModder.Core.PluginLoader.DefaultIcon;
+            int titleX = x + 10;
+            if (icon != null)
+            {
+                UIRenderer.DrawTexture(icon, x + 8, y + 6, 22, 22);
+                titleX = x + 34;
+            }
+            UIRenderer.DrawTextShadow("Storage Hub", titleX, y + 8, UIColors.TextTitle);
 
             // Header stats — chained with measured widths
-            int statX = x + TextUtil.MeasureWidth("Storage Hub") + 25;
+            int statX = titleX + TextUtil.MeasureWidth("Storage Hub") + 15;
 
             // Item count (chest storage only, exclude inventory/bank)
             int storageCount = 0;

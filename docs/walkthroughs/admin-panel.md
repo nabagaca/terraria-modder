@@ -1,5 +1,6 @@
 ---
-title: AdminPanel
+title: AdminPanel Mod - God Mode and Cheats for Terraria 1.4.5
+description: Walkthrough of the AdminPanel mod for Terraria 1.4.5. God mode, speed boost, teleport, time control, and respawn settings with custom UI sliders.
 parent: Walkthroughs
 nav_order: 6
 ---

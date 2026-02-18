@@ -1,8 +1,22 @@
 site_name: TerrariaModder
-site_description: A modding framework for Terraria 1.4.5
+site_description: >-
+  TerrariaModder is a lightweight modding framework for Terraria 1.4.5.
+  Install quality-of-life mods or create your own using Harmony patches,
+  without waiting for tModLoader.
+site_author: Inidar
 site_url: https://inidar1.github.io/terraria-modder/
 repo_url: https://github.com/Inidar1/terraria-modder
 repo_name: Inidar1/terraria-modder
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/VvVD5EeYsK
+    - icon: fontawesome/brands/github
+      link: https://github.com/Inidar1/terraria-modder
 
 theme:
   name: material
@@ -33,6 +47,7 @@ nav:
     - Installation: installation.md
     - Finding Mods: finding-mods.md
     - Troubleshooting: troubleshooting.md
+    - FAQ: faq.md
   - For Modders:
     - Making Your First Mod: making-your-first-mod.md
     - Harmony Basics: harmony-basics.md

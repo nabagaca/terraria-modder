@@ -1,5 +1,6 @@
 ---
-title: ItemSpawner
+title: ItemSpawner Mod - In-Game Item Spawner for Terraria 1.4.5
+description: Walkthrough of the ItemSpawner mod for Terraria 1.4.5. Full custom UI with search, scrolling, and item catalog. Advanced UI building tutorial.
 parent: Walkthroughs
 nav_order: 5
 ---

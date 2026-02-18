@@ -1,5 +1,6 @@
 ---
-title: AutoBuffs
+title: AutoBuffs Mod - Automatic Furniture Buffs for Terraria 1.4.5
+description: Walkthrough of the AutoBuffs mod for Terraria 1.4.5. Automatically applies nearby furniture buffs using tile scanning and Player.Update patching.
 parent: Walkthroughs
 nav_order: 2
 ---

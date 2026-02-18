@@ -1,5 +1,6 @@
 ---
-title: SeedLab
+title: SeedLab Mod - Mix Secret Seed Features in Terraria 1.4.5
+description: Walkthrough of the SeedLab mod for Terraria 1.4.5. Toggle and mix secret seed features at runtime using world-gen patching and flag overrides.
 parent: Walkthroughs
 nav_order: 9
 ---

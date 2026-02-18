@@ -10,7 +10,7 @@ namespace AutoBuffs
 {
     public class Mod : IMod
     {
-        public string Id => "auto-furniture-buffs";
+        public string Id => "auto-buffs";
         public string Name => "Auto Furniture Buffs";
         public string Version => "1.0.0";
 

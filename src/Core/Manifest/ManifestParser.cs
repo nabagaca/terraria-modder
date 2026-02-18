@@ -94,6 +94,7 @@ namespace TerrariaModder.Core.Manifest
             manifest.FrameworkVersion = ExtractString(json, "framework_version");
             manifest.EntryDll = ExtractString(json, "entry_dll");
             manifest.Homepage = ExtractString(json, "homepage");
+            manifest.Icon = ExtractString(json, "icon");
 
             manifest.Dependencies = ExtractStringArray(json, "dependencies");
             manifest.OptionalDependencies = ExtractStringArray(json, "optional_dependencies");

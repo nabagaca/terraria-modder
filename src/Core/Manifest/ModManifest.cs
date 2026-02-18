@@ -26,6 +26,7 @@ namespace TerrariaModder.Core.Manifest
         public string ConfigSchemaJson { get; set; }
         public List<KeybindDefinition> Keybinds { get; set; } = new List<KeybindDefinition>();
         public string Homepage { get; set; }
+        public string Icon { get; set; }
         public List<string> Tags { get; set; } = new List<string>();
 
         // Runtime properties (set by loader, not from JSON)

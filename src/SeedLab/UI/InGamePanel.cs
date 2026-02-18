@@ -205,7 +205,17 @@ namespace SeedLab.UI
         private void DrawHeader(int x, int y, bool blockInput)
         {
             UIRenderer.DrawRect(x, y, PanelWidth, HeaderHeight, UIColors.HeaderBg);
-            UIRenderer.DrawTextShadow("Seed Lab", x + 10, y + 9, UIColors.TextTitle);
+
+            // Draw mod icon
+            TerrariaModder.Core.PluginLoader.LoadModIcons();
+            var icon = TerrariaModder.Core.PluginLoader.GetMod("seed-lab")?.IconTexture ?? TerrariaModder.Core.PluginLoader.DefaultIcon;
+            int titleX = x + 10;
+            if (icon != null)
+            {
+                UIRenderer.DrawTexture(icon, x + 8, y + 6, 22, 22);
+                titleX = x + 34;
+            }
+            UIRenderer.DrawTextShadow("Seed Lab", titleX, y + 9, UIColors.TextTitle);
 
             // Close button
             int closeX = x + PanelWidth - 35;

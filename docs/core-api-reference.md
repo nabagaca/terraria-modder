@@ -1,5 +1,6 @@
 ---
-title: Core API Reference
+title: TerrariaModder Core API Reference
+description: API reference for TerrariaModder Core framework. Covers IMod interface, lifecycle hooks, configuration, keybinds, events, UI widgets, and Harmony integration.
 nav_order: 8
 ---
 

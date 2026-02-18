@@ -1,5 +1,6 @@
 ---
-title: Publishing Your Mod
+title: Publishing a Terraria 1.4.5 Mod
+description: How to package, publish, and distribute your Terraria 1.4.5 mod. Covers manifest.json, Nexus Mods uploads, GitHub releases, and versioning.
 nav_order: 9
 ---
 

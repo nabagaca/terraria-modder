@@ -1,5 +1,6 @@
 ---
-title: StorageHub
+title: StorageHub Mod - Unified Storage and Crafting for Terraria 1.4.5
+description: Walkthrough of the StorageHub mod for Terraria 1.4.5. Multi-tab storage UI with crafting, shimmer decraft, painting chest, and relay network.
 parent: Walkthroughs
 nav_order: 5.5
 ---

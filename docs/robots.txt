@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://inidar1.github.io/terraria-modder/sitemap.xml

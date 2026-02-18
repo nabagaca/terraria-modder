@@ -186,7 +186,8 @@ namespace StorageHub.PaintingChest
 
             _setDataMethod.Invoke(newTexture, new object[] { newPixels });
 
-            var newAsset = CreateAssetWrapper(existingAsset.GetType(), newTexture);
+            var originalName = GetAssetName(existingAsset) ?? "Images/Tiles_" + PaintingChestManager.TILE_TYPE;
+            var newAsset = CreateAssetWrapper(existingAsset.GetType(), newTexture, originalName);
             if (newAsset != null)
             {
                 tileArray.SetValue(newAsset, PaintingChestManager.TILE_TYPE);
@@ -275,7 +276,8 @@ namespace StorageHub.PaintingChest
             _setDataMethod.Invoke(newTexture, new object[] { newPixels });
 
             var existingItemAsset = itemArray.GetValue(SOURCE_ITEM_ID);
-            var newAsset = CreateAssetWrapper(existingItemAsset.GetType(), newTexture);
+            var originalItemName = GetAssetName(existingItemAsset) ?? "Images/Item_" + SOURCE_ITEM_ID;
+            var newAsset = CreateAssetWrapper(existingItemAsset.GetType(), newTexture, originalItemName);
             if (newAsset != null)
             {
                 itemArray.SetValue(newAsset, ourType);
@@ -285,12 +287,17 @@ namespace StorageHub.PaintingChest
             return false;
         }
 
-        private static object CreateAssetWrapper(Type assetType, object texture)
+        private static string GetAssetName(object asset)
+        {
+            return asset?.GetType().GetProperty("Name")?.GetValue(asset) as string;
+        }
+
+        private static object CreateAssetWrapper(Type assetType, object texture, string assetName)
         {
             try
             {
                 var instance = Activator.CreateInstance(assetType, BindingFlags.NonPublic | BindingFlags.Instance, null,
-                    new object[] { "TerrariaModder/PaintingChest" }, null)
+                    new object[] { assetName }, null)
                     ?? Activator.CreateInstance(assetType, true);
                 if (instance == null) return null;
 

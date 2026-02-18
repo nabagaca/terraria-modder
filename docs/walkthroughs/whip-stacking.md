@@ -1,5 +1,6 @@
 ---
-title: WhipStacking
+title: WhipStacking Mod - Restore Whip Tag Stacking in Terraria 1.4.5
+description: Walkthrough of the WhipStacking mod for Terraria 1.4.5. Restores pre-1.4.5 whip tag stacking using Harmony prefixes and multi-entry state tracking.
 parent: Walkthroughs
 nav_order: 7
 ---

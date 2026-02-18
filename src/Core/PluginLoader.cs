@@ -47,6 +47,11 @@ namespace TerrariaModder.Core
         /// Version compatibility warning (if mod requires newer Core).
         /// </summary>
         public string VersionWarning { get; set; }
+
+        /// <summary>
+        /// Loaded icon texture (Texture2D via reflection). Null if no icon.
+        /// </summary>
+        public object IconTexture { get; set; }
     }
 
     /// <summary>
@@ -130,11 +135,17 @@ namespace TerrariaModder.Core
         private static readonly List<ModInfo> _mods = new List<ModInfo>();
         private static readonly Dictionary<string, ModInfo> _modsById = new Dictionary<string, ModInfo>();
         private static ILogger _log;
+        private static bool _iconsLoaded;
 
         /// <summary>
         /// Get list of all discovered mods.
         /// </summary>
         public static IReadOnlyList<ModInfo> Mods => _mods.AsReadOnly();
+
+        /// <summary>
+        /// Default framework icon (Texture2D). Loaded lazily.
+        /// </summary>
+        public static object DefaultIcon { get; private set; }
 
         /// <summary>
         /// Get a mod by ID.
@@ -143,6 +154,44 @@ namespace TerrariaModder.Core
         {
             _modsById.TryGetValue(modId, out var mod);
             return mod;
+        }
+
+        /// <summary>
+        /// Load icon textures for all mods. Called lazily on first UI draw.
+        /// Safe to call multiple times; no-ops after first success.
+        /// </summary>
+        public static void LoadModIcons()
+        {
+            if (_iconsLoaded) return;
+
+            // Load default Core icon
+            var config = CoreConfig.Instance;
+            string coreIconPath = Path.Combine(config.CorePath, "assets", "icon.png");
+            DefaultIcon = UI.UIRenderer.LoadTexture(coreIconPath);
+            if (DefaultIcon == null)
+            {
+                _log?.Debug($"[PluginLoader] No default icon at {coreIconPath}");
+                return; // GraphicsDevice may not be ready yet, retry later
+            }
+
+            // Load per-mod icons
+            foreach (var mod in _mods)
+            {
+                if (mod.Manifest?.FolderPath == null) continue;
+
+                // Check manifest "icon" field, or default to icon.png
+                string iconFile = mod.Manifest.Icon ?? "icon.png";
+                string iconPath = Path.Combine(mod.Manifest.FolderPath, iconFile);
+
+                if (File.Exists(iconPath))
+                {
+                    mod.IconTexture = UI.UIRenderer.LoadTexture(iconPath);
+                }
+            }
+
+            _iconsLoaded = true;
+            int modIcons = _mods.Count(m => m.IconTexture != null);
+            _log?.Info($"[PluginLoader] Loaded icons: default={DefaultIcon != null}, {modIcons} mod icon(s)");
         }
 
         /// <summary>

@@ -1,5 +1,6 @@
 ---
-title: SkipIntro
+title: SkipIntro Mod - Terraria 1.4.5 Harmony Patch Example
+description: Walkthrough of a simple Terraria 1.4.5 mod that skips the ReLogic splash screen. Learn Harmony patching and lifecycle hooks for beginners.
 parent: Walkthroughs
 nav_order: 1
 ---

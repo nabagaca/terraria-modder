@@ -69,6 +69,12 @@ namespace TerrariaModder.Core.UI.Widgets
         public Action OnClose { get; set; }
 
         /// <summary>
+        /// Optional icon texture (Texture2D via reflection) displayed in the header.
+        /// Load via UIRenderer.LoadTexture() or set from ModInfo.IconTexture.
+        /// </summary>
+        public object IconTexture { get; set; }
+
+        /// <summary>
         /// Whether BeginDraw/EndDraw should clip the content area.
         /// Default true. Set to false when the panel manages its own clip regions
         /// (e.g., panels with tab bars, toolbars, and footers outside the scroll area).
@@ -184,7 +190,23 @@ namespace TerrariaModder.Core.UI.Widgets
 
             // Draw header
             UIRenderer.DrawRect(_panelX, _panelY, Width, HeaderHeight, UIColors.HeaderBg);
-            UIRenderer.DrawTextShadow(Title, _panelX + 10, _panelY + 9, UIColors.TextTitle);
+
+            // Resolve icon: explicit > mod-specific > framework default
+            PluginLoader.LoadModIcons();
+            var icon = IconTexture;
+            if (icon == null)
+            {
+                var modInfo = PluginLoader.GetMod(PanelId);
+                icon = modInfo?.IconTexture ?? PluginLoader.DefaultIcon;
+            }
+
+            int titleX = _panelX + 10;
+            if (icon != null)
+            {
+                UIRenderer.DrawTexture(icon, _panelX + 8, _panelY + 6, 22, 22);
+                titleX = _panelX + 34;
+            }
+            UIRenderer.DrawTextShadow(Title, titleX, _panelY + 9, UIColors.TextTitle);
 
             // Close button
             if (ShowCloseButton)

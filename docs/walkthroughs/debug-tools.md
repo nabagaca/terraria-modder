@@ -1,5 +1,6 @@
 ---
-title: DebugTools
+title: DebugTools Mod - HTTP Debug Server for Terraria 1.4.5
+description: Walkthrough of the DebugTools mod for Terraria 1.4.5. REST API, in-game console, virtual input injection, and window management for automated testing.
 parent: Walkthroughs
 nav_order: 8
 ---

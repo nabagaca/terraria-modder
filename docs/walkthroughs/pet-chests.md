@@ -1,5 +1,6 @@
 ---
-title: PetChests
+title: PetChests Mod - Use Pets as Piggy Banks in Terraria 1.4.5
+description: Walkthrough of the PetChests mod for Terraria 1.4.5. Right-click cosmetic pets to open piggy bank storage using projectile interaction and Harmony patches.
 parent: Walkthroughs
 nav_order: 4
 ---

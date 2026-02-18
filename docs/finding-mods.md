@@ -1,5 +1,6 @@
 ---
-title: Available Mods
+title: Available Mods for Terraria 1.4.5
+description: Browse all available TerrariaModder mods for Terraria 1.4.5 including auto-buffs, storage hub, admin panel, quick keys, and more QoL improvements.
 nav_order: 4
 ---
 

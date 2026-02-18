@@ -1,5 +1,6 @@
 ---
-title: Installation
+title: Install Terraria 1.4.5 Mods - TerrariaModder Setup Guide
+description: Step-by-step guide to install TerrariaModder and mods on Terraria 1.4.5. Download, extract, and launch with TerrariaInjector in minutes.
 nav_order: 2
 ---
 

@@ -167,6 +167,9 @@ namespace TerrariaModder.Core.UI
 
         private static void DrawInternal()
         {
+            // Ensure mod icons are loaded (lazy, safe to call every frame)
+            PluginLoader.LoadModIcons();
+
             // Clear tooltip each frame
             Tooltip.Clear();
 
@@ -216,6 +219,14 @@ namespace TerrariaModder.Core.UI
             UIRenderer.DrawRect(menuX, menuY, MenuWidth, 35, UIColors.HeaderBg);
             string headerText = "TerrariaModder v" + PluginLoader.FrameworkVersion;
 
+            // Draw header icon
+            int headerTextX = menuX + Padding;
+            if (PluginLoader.DefaultIcon != null)
+            {
+                UIRenderer.DrawTexture(PluginLoader.DefaultIcon, menuX + Padding, menuY + 5, 24, 24);
+                headerTextX += 28;
+            }
+
             // Check if any mod needs restart (non-hot-reload mods with baseline changes)
             bool anyNeedsRestart = false;
             foreach (var mod in PluginLoader.Mods)
@@ -232,12 +243,12 @@ namespace TerrariaModder.Core.UI
                 }
             }
 
-            UIRenderer.DrawTextShadow(headerText, menuX + Padding, menuY + 8, UIColors.Text);
+            UIRenderer.DrawTextShadow(headerText, headerTextX, menuY + 8, UIColors.Text);
 
             // Show [Restart Required] tag if any mod needs restart
             if (anyNeedsRestart)
             {
-                int tagX = menuX + Padding + TextUtil.MeasureWidth(headerText) + 10;
+                int tagX = headerTextX + TextUtil.MeasureWidth(headerText) + 10;
                 UIRenderer.DrawText("[Game Restart Required]", tagX, menuY + 8, UIColors.Error);
             }
 
@@ -428,6 +439,14 @@ namespace TerrariaModder.Core.UI
                 var bg = isSelected ? UIColors.ItemActiveBg : (isHover ? UIColors.ItemHoverBg : UIColors.ItemBg);
                 UIRenderer.DrawRect(x, itemY, contentWidth, ItemHeight - 2, bg);
 
+                // Mod icon (only if mod provides its own)
+                int iconOffset = 0;
+                if (mod.IconTexture != null)
+                {
+                    UIRenderer.DrawTexture(mod.IconTexture, x + 3, itemY + 2, 22, 22);
+                    iconOffset = 24;
+                }
+
                 // Status indicator symbol
                 var statusColor = mod.State == ModState.Loaded ? UIColors.Success :
                                   mod.State == ModState.Errored ? UIColors.Error :
@@ -435,11 +454,11 @@ namespace TerrariaModder.Core.UI
                 string statusSymbol = mod.State == ModState.Loaded ? "\u2713" :
                                       mod.State == ModState.Errored ? "X" :
                                       mod.State == ModState.DependencyError ? "\u25CF" : "\u25CF";
-                UIRenderer.DrawTextShadow(statusSymbol, x + 5, itemY + 5, statusColor);
+                UIRenderer.DrawTextShadow(statusSymbol, x + 5 + iconOffset, itemY + 5, statusColor);
 
                 // Mod name and version
-                string name = TextUtil.Truncate(mod.Manifest.Name, contentWidth - 110);
-                UIRenderer.DrawTextShadow(name, x + 22, itemY + 5, UIColors.Text);
+                string name = TextUtil.Truncate(mod.Manifest.Name, contentWidth - 110 - iconOffset);
+                UIRenderer.DrawTextShadow(name, x + 22 + iconOffset, itemY + 5, UIColors.Text);
                 UIRenderer.DrawText("v" + mod.Manifest.Version, x + contentWidth - 80, itemY + 5, UIColors.TextDim);
 
                 // Click to select

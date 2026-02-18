@@ -1,5 +1,6 @@
 ---
-title: Home
+title: TerrariaModder - Modding Framework for Terraria 1.4.5
+description: A lightweight modding framework for Terraria 1.4.5. Install QoL mods or create your own using Harmony runtime patches, without waiting for tModLoader.
 ---
 
 # TerrariaModder

@@ -1,5 +1,6 @@
 ---
-title: Tested Patterns
+title: Tested Modding Patterns for Terraria 1.4.5
+description: Proven code patterns for Terraria 1.4.5 modding. Harmony patches, reflection, tile scanning, inventory manipulation, and UI drawing techniques that work.
 nav_order: 7
 ---
 

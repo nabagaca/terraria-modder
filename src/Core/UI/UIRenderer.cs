@@ -1607,6 +1607,171 @@ namespace TerrariaModder.Core.UI
 
         #endregion
 
+        #region Texture Loading & Drawing
+
+        private static MethodInfo _fromStreamMethod;
+        private static bool _textureLoadingInitialized;
+        private static bool _textureLoadingFailed;
+        private static readonly Dictionary<string, object> _textureCache = new Dictionary<string, object>();
+
+        /// <summary>
+        /// Load a PNG file as a Texture2D. Returns cached texture on subsequent calls.
+        /// Returns null if file not found or loading fails.
+        /// </summary>
+        public static object LoadTexture(string pngPath)
+        {
+            if (string.IsNullOrEmpty(pngPath)) return null;
+            if (!EnsureInitialized()) return null;
+
+            // Check cache first
+            if (_textureCache.TryGetValue(pngPath, out var cached))
+                return cached;
+
+            if (!InitTextureLoading()) return null;
+
+            if (!System.IO.File.Exists(pngPath))
+            {
+                _log?.Warn($"[UI] Texture not found: {pngPath}");
+                return null;
+            }
+
+            try
+            {
+                object texture;
+                using (var stream = System.IO.File.OpenRead(pngPath))
+                {
+                    texture = _fromStreamMethod.Invoke(null, new object[] { _graphicsDevice, stream });
+                }
+
+                if (texture == null)
+                {
+                    _log?.Warn($"[UI] FromStream returned null for {pngPath}");
+                    return null;
+                }
+
+                _textureCache[pngPath] = texture;
+                _log?.Debug($"[UI] Loaded texture: {System.IO.Path.GetFileName(pngPath)}");
+                return texture;
+            }
+            catch (Exception ex)
+            {
+                var msg = ex.InnerException?.Message ?? ex.Message;
+                _log?.Warn($"[UI] Failed to load texture {pngPath}: {msg}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Draw a Texture2D (loaded via LoadTexture) at the specified position.
+        /// Maintains aspect ratio within the given width/height bounds.
+        /// </summary>
+        public static void DrawTexture(object texture, int x, int y, int width, int height, byte alpha = 255)
+        {
+            if (texture == null) return;
+            if (!EnsureInitialized()) return;
+            if (_drawTextureRect == null || _spriteBatch == null) return;
+
+            try
+            {
+                // Get texture dimensions
+                var texType = texture.GetType();
+                var widthProp = texType.GetProperty("Width");
+                var heightProp = texType.GetProperty("Height");
+                if (widthProp == null || heightProp == null) return;
+
+                int texWidth = (int)widthProp.GetValue(texture);
+                int texHeight = (int)heightProp.GetValue(texture);
+                if (texWidth <= 0 || texHeight <= 0) return;
+
+                // Calculate scale to fit within bounds while maintaining aspect ratio
+                float scaleX = (float)width / texWidth;
+                float scaleY = (float)height / texHeight;
+                float scale = Math.Min(scaleX, scaleY);
+
+                int drawWidth = (int)(texWidth * scale);
+                int drawHeight = (int)(texHeight * scale);
+
+                // Center within target area
+                int drawX = x + (width - drawWidth) / 2;
+                int drawY = y + (height - drawHeight) / 2;
+
+                var destRect = _rectangleCtor.Invoke(new object[] { drawX, drawY, drawWidth, drawHeight });
+                var color = _colorCtorRgba.Invoke(new object[] { 255, 255, 255, (int)alpha });
+
+                _drawTextureRect.Invoke(_spriteBatch, new object[] { texture, destRect, color });
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[UI] DrawTexture failed: {ex.InnerException?.Message ?? ex.Message}");
+            }
+        }
+
+        private static bool InitTextureLoading()
+        {
+            if (_textureLoadingInitialized) return !_textureLoadingFailed;
+            if (_textureLoadingFailed) return false;
+
+            try
+            {
+                // Find Texture2D type
+                Type texture2dType = null;
+                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    texture2dType = asm.GetType("Microsoft.Xna.Framework.Graphics.Texture2D");
+                    if (texture2dType != null) break;
+                }
+                if (texture2dType == null) { _textureLoadingFailed = true; return false; }
+
+                // Find GraphicsDevice type
+                var gdType = texture2dType.Assembly.GetType("Microsoft.Xna.Framework.Graphics.GraphicsDevice");
+                if (gdType == null) { _textureLoadingFailed = true; return false; }
+
+                // Find FromStream(GraphicsDevice, Stream)
+                _fromStreamMethod = texture2dType.GetMethod("FromStream",
+                    BindingFlags.Public | BindingFlags.Static, null,
+                    new[] { gdType, typeof(System.IO.Stream) }, null);
+                if (_fromStreamMethod == null) { _textureLoadingFailed = true; return false; }
+
+                // Get GraphicsDevice from Main
+                var mainType = typeof(Terraria.Main);
+                var graphicsProp = mainType.GetProperty("graphics", BindingFlags.Public | BindingFlags.Static);
+                if (graphicsProp != null)
+                {
+                    var gm = graphicsProp.GetValue(null);
+                    if (gm != null)
+                    {
+                        var gdProp = gm.GetType().GetProperty("GraphicsDevice");
+                        _graphicsDevice = gdProp?.GetValue(gm);
+                    }
+                }
+
+                if (_graphicsDevice == null)
+                {
+                    var instField = mainType.GetField("instance", BindingFlags.Public | BindingFlags.Static);
+                    var inst = instField?.GetValue(null);
+                    if (inst != null)
+                    {
+                        var gdProp = inst.GetType().GetProperty("GraphicsDevice");
+                        _graphicsDevice = gdProp?.GetValue(inst);
+                    }
+                }
+
+                if (_graphicsDevice == null) return false; // Not ready yet, retry later
+
+                _textureLoadingInitialized = true;
+                _log?.Info("[UI] Texture loading initialized");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[UI] InitTextureLoading failed: {ex.Message}");
+                _textureLoadingFailed = true;
+                return false;
+            }
+        }
+
+        #endregion
+
         #endregion
 
         #region Input

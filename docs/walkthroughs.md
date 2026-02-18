@@ -1,5 +1,6 @@
 ---
-title: Walkthroughs
+title: Terraria 1.4.5 Mod Walkthroughs - Learn by Example
+description: Study real working Terraria 1.4.5 mods. Walkthroughs cover Harmony patching, UI building, input handling, tile scanning, and more with full source code.
 nav_order: 10
 has_children: true
 ---

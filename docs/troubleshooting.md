@@ -1,5 +1,6 @@
 ---
-title: Troubleshooting
+title: Troubleshooting TerrariaModder - Fix Common Issues
+description: Solutions for common TerrariaModder problems on Terraria 1.4.5. Fix launch issues, mod loading errors, crashes, keybind conflicts, and more.
 nav_order: 3
 ---
 
@@ -182,7 +183,7 @@ Terraria/TerrariaModder/mods/{mod-id}/config.json
 
 For example:
 - `Terraria/TerrariaModder/mods/quick-keys/config.json`
-- `Terraria/TerrariaModder/mods/auto-furniture-buffs/config.json`
+- `Terraria/TerrariaModder/mods/auto-buffs/config.json`
 
 Keybind overrides are stored at:
 ```
