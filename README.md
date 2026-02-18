@@ -1,6 +1,6 @@
 # TerrariaModder
 
-[![Discord](https://img.shields.io/discord/1338259498498187264?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/VvVD5EeYsK)
+[![Discord](https://img.shields.io/discord/1467363973526716572?color=5865F2&logo=discord&logoColor=white&label=Discord)](https://discord.gg/VvVD5EeYsK)
 
 A lightweight modding framework for Terraria 1.4.5. No tModLoader required.
 
