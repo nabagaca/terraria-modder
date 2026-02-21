@@ -33,6 +33,7 @@ namespace StorageHub.PaintingChest
         private static MethodInfo _openChestMethod;
         private static MethodInfo _inTileEntityInteractionRange;
         private static object _tileReachSimple;
+        private static FieldInfo _chestEntriesField;
 
         private static Type _mainType;
         private static Type _playerType;
@@ -157,6 +158,10 @@ namespace StorageHub.PaintingChest
             _openChestMethod = _playerType.GetMethod("OpenChest",
                 BindingFlags.NonPublic | BindingFlags.Instance, null, new[] { typeof(int), typeof(int), typeof(int) }, null);
 
+            // CoinSlot.ChestEntries — fixed at 200, must be resized for large chests
+            var coinSlotType = _mainType.Assembly.GetType("Terraria.UI.CoinSlot");
+            _chestEntriesField = coinSlotType?.GetField("ChestEntries", BindingFlags.NonPublic | BindingFlags.Static);
+
             var tileReachType = _playerType.Assembly.GetType("Terraria.DataStructures.TileReachCheckSettings");
             if (tileReachType != null)
             {
@@ -199,6 +204,32 @@ namespace StorageHub.PaintingChest
         }
 
         #region Helpers
+
+        /// <summary>
+        /// Resize CoinSlot.ChestEntries if it's too small for the given chest capacity.
+        /// Vanilla allocates this at 200 — painting chest can go up to 1000.
+        /// Without this, SetGlowForChest → CoinSlot.ForceSlotState crashes with IndexOutOfRange.
+        /// </summary>
+        private static void EnsureCoinSlotCapacity(int requiredSlots)
+        {
+            if (_chestEntriesField == null) return;
+            try
+            {
+                var arr = _chestEntriesField.GetValue(null) as Array;
+                if (arr != null && arr.Length < requiredSlots)
+                {
+                    var elemType = arr.GetType().GetElementType();
+                    var newArr = Array.CreateInstance(elemType, requiredSlots);
+                    Array.Copy(arr, newArr, arr.Length);
+                    _chestEntriesField.SetValue(null, newArr);
+                    _log?.Info($"Resized CoinSlot.ChestEntries: {arr.Length} → {requiredSlots}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"EnsureCoinSlotCapacity error: {ex.Message}");
+            }
+        }
 
         private static int GetStyleFromTile(int frameY)
         {
@@ -272,7 +303,8 @@ namespace StorageHub.PaintingChest
             }
             catch (Exception ex)
             {
-                _log?.Error($"TileObjectPlace_Postfix error: {ex.Message}");
+                var inner = ex.InnerException ?? ex;
+                _log?.Error($"TileObjectPlace_Postfix error: {inner.Message}\n{inner.StackTrace}");
             }
         }
 
@@ -309,17 +341,16 @@ namespace StorageHub.PaintingChest
                     _chestField.SetValue(__instance, -1);
                     PlaySound(11); // chest close
                 }
-                else if (currentChest == -1)
-                {
-                    // Opening fresh (no other chest open)
-                    _openChestMethod.Invoke(__instance, new object[] { topX, topY, chestIdx });
-                    PlaySound(10); // chest open
-                }
                 else
                 {
-                    // Switching from another chest
+                    // Resize CoinSlot.ChestEntries before OpenChest — vanilla caps at 200,
+                    // painting chest can have up to 1000 slots
+                    var chest = Main.chest[chestIdx];
+                    if (chest != null)
+                        EnsureCoinSlotCapacity(chest.maxItems);
+
                     _openChestMethod.Invoke(__instance, new object[] { topX, topY, chestIdx });
-                    PlaySound(12); // chest switch
+                    PlaySound(currentChest == -1 ? 10 : 12); // open vs switch
                 }
 
                 var openedChest = Main.chest[chestIdx];
@@ -333,7 +364,8 @@ namespace StorageHub.PaintingChest
             }
             catch (Exception ex)
             {
-                _log?.Error($"TileInteractionsUse_Prefix error: {ex.Message}");
+                var inner = ex.InnerException ?? ex;
+                _log?.Error($"TileInteractionsUse_Prefix error: {inner.Message}\n{inner.StackTrace}");
                 return true;
             }
         }
@@ -380,7 +412,8 @@ namespace StorageHub.PaintingChest
             }
             catch (Exception ex)
             {
-                _log?.Error($"KillTile_Prefix error: {ex.Message}");
+                var inner = ex.InnerException ?? ex;
+                _log?.Error($"KillTile_Prefix error: {inner.Message}\n{inner.StackTrace}");
                 return true;
             }
         }
@@ -450,7 +483,8 @@ namespace StorageHub.PaintingChest
             }
             catch (Exception ex)
             {
-                _log?.Error($"Check3x2Wall_Prefix error: {ex.Message}");
+                var inner = ex.InnerException ?? ex;
+                _log?.Error($"Check3x2Wall_Prefix error: {inner.Message}\n{inner.StackTrace}");
                 return true;
             }
         }
@@ -478,7 +512,8 @@ namespace StorageHub.PaintingChest
             }
             catch (Exception ex)
             {
-                _log?.Error($"IsInInteractionRange_Prefix error: {ex.Message}");
+                var inner = ex.InnerException ?? ex;
+                _log?.Error($"IsInInteractionRange_Prefix error: {inner.Message}\n{inner.StackTrace}");
                 return true;
             }
         }
