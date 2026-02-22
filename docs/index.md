@@ -47,6 +47,7 @@ Download Core and any mods you want from [Nexus Mods](https://www.nexusmods.com/
 | **AdminPanel** | God mode, movement speed, teleports, time controls, respawn settings | Backslash, F9 | [Nexus](https://www.nexusmods.com/terraria/mods/137) |
 | **WhipStacking** | Restores pre-1.4.5 whip tag stacking | Automatic | [Nexus](https://www.nexusmods.com/terraria/mods/139) |
 | **SeedLab** | Toggle secret seed features for world gen (WIP) | F10 | [Nexus](https://www.nexusmods.com/terraria/mods/144) |
+| **FpsUnlocked** | Unlock frame rate with smooth interpolation (60hz logic + high-FPS rendering) | Automatic | [Nexus](https://www.nexusmods.com/terraria/mods/147) |
 | **DebugTools** | Debug HTTP server, in-game console, virtual input, window management | Ctrl+` | — |
 
 Press **F6** in-game to configure mods and rebind keys. Changes are saved automatically and keybinds persist across game restarts.

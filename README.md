@@ -34,6 +34,7 @@ A GUI mod manager app is coming soon.
 | AdminPanel | God mode, movement speed, teleports, time controls, respawn | Backslash, F9 | [Nexus](https://www.nexusmods.com/terraria/mods/137) |
 | WhipStacking | Restores pre-1.4.5 whip tag stacking | (auto) | [Nexus](https://www.nexusmods.com/terraria/mods/139) |
 | SeedLab | Toggle secret seed features for world gen (WIP) | F10 | [Nexus](https://www.nexusmods.com/terraria/mods/144) |
+| FpsUnlocked | Unlock frame rate with smooth interpolation | (auto) | [Nexus](https://www.nexusmods.com/terraria/mods/147) |
 
 **Optional (for mod developers):**
 

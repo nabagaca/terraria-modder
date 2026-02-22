@@ -23,3 +23,4 @@ Each walkthrough breaks down a bundled mod, explaining the key concepts and patt
 | [WhipStacking](walkthroughs/whip-stacking) | Intermediate | Harmony prefixes, restoring removed mechanics |
 | [DebugTools](walkthroughs/debug-tools) | Advanced | HTTP server, console, virtual input, window management |
 | [SeedLab](walkthroughs/seed-lab) | Advanced | World-gen patching, runtime seed feature toggling |
+| [Asset Experience Mod](walkthroughs/asset-experience-mod) | Intermediate | Custom items, textures, hooks, recipes, shops, drops |
