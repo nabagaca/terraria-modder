@@ -15,7 +15,7 @@ namespace AdminPanel
     {
         public string Id => "admin-panel";
         public string Name => "Admin Panel";
-        public string Version => "1.1.0";
+        public string Version => "1.1.1";
 
         #region Constants
 
