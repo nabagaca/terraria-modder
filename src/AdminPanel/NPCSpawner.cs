@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using TerrariaModder.Core.Input;
 using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.UI;
 using TerrariaModder.Core.UI.Widgets;
@@ -219,7 +220,7 @@ namespace AdminPanel
             // Right-click spawn: works even when panel is closed
             if (_rightClickSpawn && _selectedId > 0 && !IsGameMenu())
             {
-                if (UIRenderer.MouseRightClick && !UIRenderer.IsMouseOverAnyPanel())
+                if (InputState.IsKeyJustPressed(KeyCode.MouseRight) && !UIRenderer.IsMouseOverAnyPanel())
                 {
                     SpawnAtCursor();
                 }
