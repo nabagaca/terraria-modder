@@ -125,6 +125,7 @@ namespace TerrariaModder.Core.Assets
                     if (result < 0)
                         throw new InvalidOperationException("TileTypeExtension failed");
 
+                    TileTextureLoader.ApplyPatches();
                     TileObjectRegistrar.ApplyDefinitions();
                     TileBehaviorPatches.ApplyPatches();
                 }
@@ -197,7 +198,14 @@ namespace TerrariaModder.Core.Assets
 
         public static void OnUpdate()
         {
-            if (!_patchesApplied || TexturesStable) return;
+            if (!_patchesApplied) return;
+
+            // TileObjectData can become available later in startup (during splash init).
+            // Retry failed custom tile metadata registration until it succeeds.
+            if (_hasCustomTiles)
+                TileObjectRegistrar.ApplyDefinitions();
+
+            if (TexturesStable) return;
 
             _textureRetryCount++;
 

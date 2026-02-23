@@ -26,6 +26,8 @@ namespace TerrariaModder.Core.Assets
         public int UseTime { get; set; } = 20;
         public int UseAnimation { get; set; } = 20;
         public int UseStyle { get; set; }
+        public bool UseTurn { get; set; }
+        public int UseSoundStyle { get; set; } = -1;
         public int Crit { get; set; } = 4;
         public int Mana { get; set; }
         public bool AutoReuse { get; set; }

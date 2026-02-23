@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using HarmonyLib;
 using TerrariaModder.Core.Logging;
 
 namespace TerrariaModder.Core.Assets
@@ -18,15 +19,49 @@ namespace TerrariaModder.Core.Assets
         private static object _graphicsDevice;
         private static bool _reflectionReady;
         private static bool _reflectionFailed;
+        private static bool _patchesApplied;
+        private static Harmony _harmony;
 
         private static readonly Dictionary<int, object> _assetCache = new Dictionary<int, object>();
 
         public static void Initialize(ILogger logger)
         {
             _log = logger;
+            _harmony = new Harmony("com.terrariamodder.assets.tiletextures");
         }
 
         public static bool IsReflectionReady => _reflectionReady;
+
+        public static void ApplyPatches()
+        {
+            if (_patchesApplied) return;
+
+            try
+            {
+                var loadTiles = typeof(Terraria.Main).GetMethod("LoadTiles",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                    null,
+                    new[] { typeof(int) },
+                    null);
+
+                if (loadTiles == null)
+                {
+                    _log?.Warn("[TileTextureLoader] Main.LoadTiles(int) not found");
+                    return;
+                }
+
+                var prefix = typeof(TileTextureLoader).GetMethod(nameof(LoadTiles_Prefix),
+                    BindingFlags.NonPublic | BindingFlags.Static);
+                _harmony.Patch(loadTiles, prefix: new HarmonyMethod(prefix));
+
+                _patchesApplied = true;
+                _log?.Info("[TileTextureLoader] Patched Main.LoadTiles(int) for custom tile IDs");
+            }
+            catch (Exception ex)
+            {
+                _log?.Error($"[TileTextureLoader] Failed to patch Main.LoadTiles: {ex.Message}");
+            }
+        }
 
         public static int InjectAllTextures()
         {
@@ -169,6 +204,46 @@ namespace TerrariaModder.Core.Assets
             catch
             {
                 return false;
+            }
+        }
+
+        // Terraria calls Main.LoadTiles(i) during startup and expects Images/Tiles_i for every i < TileID.Count.
+        // Custom tile IDs have no vanilla content path; skip those loads and keep placeholder/cached assets instead.
+        private static bool LoadTiles_Prefix(int i)
+        {
+            try
+            {
+                if (i < TileRegistry.VanillaTileCount)
+                    return true;
+
+                ForceTileTextureSlot(i);
+                return false;
+            }
+            catch
+            {
+                // If fallback fails, still skip vanilla load to avoid asset popup/crash.
+                return false;
+            }
+        }
+
+        private static void ForceTileTextureSlot(int tileType)
+        {
+            var field = typeof(Terraria.GameContent.TextureAssets).GetField("Tile", BindingFlags.Public | BindingFlags.Static);
+            var arr = field?.GetValue(null) as Array;
+            if (arr == null || tileType < 0 || tileType >= arr.Length)
+                return;
+
+            if (_assetCache.TryGetValue(tileType, out var cached) && cached != null)
+            {
+                arr.SetValue(cached, tileType);
+                return;
+            }
+
+            object placeholder = arr.GetValue(0);
+            if (placeholder != null)
+            {
+                arr.SetValue(placeholder, tileType);
+                _assetCache[tileType] = placeholder;
             }
         }
 

@@ -1,4 +1,6 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Terraria;
@@ -20,6 +22,8 @@ namespace TerrariaModder.Core.Assets
         private static object _tileReachSimple;
         private static MethodInfo _getItemSourceFromTileBreak;
         private static MethodInfo _newItemMethod;
+        private static readonly HashSet<int> _loggedFallbackPlacementTypes = new HashSet<int>();
+        private static readonly HashSet<int> _loggedMissingTileObjectDataTypes = new HashSet<int>();
 
         // Thread-local break context used by KillTile prefix/postfix.
         [ThreadStatic] private static bool _pendingBreak;
@@ -43,6 +47,7 @@ namespace TerrariaModder.Core.Assets
                 int patched = 0;
                 patched += PatchTileInteractionsUse();
                 patched += PatchTileObjectPlace();
+                patched += PatchPlaceTile();
                 patched += PatchKillTile();
                 patched += PatchInteractionRange();
 
@@ -170,6 +175,30 @@ namespace TerrariaModder.Core.Assets
             }
         }
 
+        private static int PatchPlaceTile()
+        {
+            try
+            {
+                var method = typeof(WorldGen).GetMethod("PlaceTile",
+                    BindingFlags.Public | BindingFlags.Static, null,
+                    new[] { typeof(int), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(int), typeof(int) }, null);
+                if (method == null)
+                {
+                    _log?.Warn("[TileBehaviorPatches] WorldGen.PlaceTile not found");
+                    return 0;
+                }
+
+                _harmony.Patch(method,
+                    prefix: new HarmonyMethod(typeof(TileBehaviorPatches), nameof(PlaceTile_Prefix)));
+                return 1;
+            }
+            catch (Exception ex)
+            {
+                _log?.Warn($"[TileBehaviorPatches] PlaceTile patch failed: {ex.Message}");
+                return 0;
+            }
+        }
+
         private static int PatchInteractionRange()
         {
             try
@@ -255,6 +284,8 @@ namespace TerrariaModder.Core.Assets
                     topY = yCoord;
                 }
 
+                NormalizeMultiTileFrames(topX, topY, type, def);
+
                 if (def.IsContainer)
                 {
                     int chestIndex = Chest.FindChest(topX, topY);
@@ -279,6 +310,8 @@ namespace TerrariaModder.Core.Assets
 
                 try { def.OnPlace?.Invoke(topX, topY); }
                 catch (Exception ex) { _log?.Debug($"[TileBehaviorPatches] OnPlace hook error: {ex.Message}"); }
+
+                TryPlayTileSound(def.HitSoundStyle, topX, topY);
             }
             catch (Exception ex)
             {
@@ -302,6 +335,8 @@ namespace TerrariaModder.Core.Assets
                     topY = j;
                 }
 
+                bool isMultiTile = def.Width > 1 || def.Height > 1;
+
                 if (def.IsContainer)
                 {
                     if (def.ContainerRequiresEmptyToBreak && !WorldGen.destroyObject)
@@ -310,19 +345,26 @@ namespace TerrariaModder.Core.Assets
                         if (chestIndex >= 0 && ChestHasItems(chestIndex))
                             return false;
                     }
+                }
 
-                    _pendingBreak = true;
-                    _pendingBreakTopX = topX;
-                    _pendingBreakTopY = topY;
-                    _pendingBreakDef = def;
-                }
-                else
+                // Always handle custom multi-tile destruction ourselves on actual break calls.
+                // This avoids vanilla per-subtile kill flow causing duplicate drops/chest drops.
+                if (isMultiTile && !effectOnly && !fail)
                 {
-                    _pendingBreak = true;
-                    _pendingBreakTopX = topX;
-                    _pendingBreakTopY = topY;
-                    _pendingBreakDef = def;
+                    BreakCustomMultiTile(topX, topY, def, effectOnly, noItem);
+                    return false;
                 }
+
+                // Fallback-safe behavior for multi-tiles only when object-data metadata is missing.
+                if (isMultiTile && !HasTileObjectData(tileType))
+                {
+                    return true;
+                }
+
+                _pendingBreak = true;
+                _pendingBreakTopX = topX;
+                _pendingBreakTopY = topY;
+                _pendingBreakDef = def;
             }
             catch (Exception ex)
             {
@@ -359,8 +401,10 @@ namespace TerrariaModder.Core.Assets
 
                     if (_pendingBreakDef.IsContainer)
                     {
-                        Chest.DestroyChest(_pendingBreakTopX, _pendingBreakTopY);
+                        RemoveCustomChest(_pendingBreakTopX, _pendingBreakTopY);
                     }
+
+                    TryPlayTileSound(_pendingBreakDef.HitSoundStyle, _pendingBreakTopX, _pendingBreakTopY);
 
                     if (!effectOnly && !noItem && !string.IsNullOrEmpty(_pendingBreakDef.DropItemId))
                     {
@@ -405,6 +449,316 @@ namespace TerrariaModder.Core.Assets
             }
         }
 
+        // WorldGen.PlaceTile(...) prefix
+        // Fallback path for custom multi-tiles when TileObjectData registration is unavailable.
+        private static bool PlaceTile_Prefix(int i, int j, int Type, bool mute, bool forced, int plr, int style, ref bool __result)
+        {
+            try
+            {
+                if (!TileRegistry.IsCustomTile(Type))
+                    return true;
+
+                var def = TileRegistry.GetDefinition(Type);
+                if (def == null)
+                    return true;
+
+                if (def.Width <= 1 && def.Height <= 1)
+                    return true;
+
+                if (HasTileObjectData(Type))
+                    return true; // Normal object placement path is available.
+
+                // Re-run registration in case TileObjectData was invalidated after
+                // an earlier successful pass.
+                TileObjectRegistrar.ApplyDefinitions();
+                if (HasTileObjectData(Type))
+                    return true;
+
+                if (_loggedFallbackPlacementTypes.Add(Type))
+                {
+                    _log?.Warn($"[TileBehaviorPatches] Using fallback placement for custom multi-tile {Type} ({def.DisplayName}) because TileObjectData is unavailable");
+                }
+
+                bool placed = TryPlaceCustomMultiTile(i, j, Type, def, out int topX, out int topY);
+                __result = placed;
+
+                if (placed)
+                {
+                    if (def.IsContainer)
+                        InitializeContainerAt(topX, topY, def);
+
+                    try { def.OnPlace?.Invoke(topX, topY); } catch { }
+                    TryPlayTileSound(def.HitSoundStyle, topX, topY);
+                }
+
+                return false; // Skip vanilla PlaceTile for this custom multi-tile.
+            }
+            catch (Exception ex)
+            {
+                _log?.Debug($"[TileBehaviorPatches] PlaceTile fallback error: {ex.Message}");
+                __result = false;
+                return false;
+            }
+        }
+
+        private static bool HasTileObjectData(int tileType)
+        {
+            try
+            {
+                var todType = typeof(Main).Assembly.GetType("Terraria.ObjectData.TileObjectData");
+                if (todType == null)
+                {
+                    LogMissingTileObjectData(tileType, "TileObjectData type is unavailable");
+                    return false;
+                }
+
+                object existing = null;
+                var getTileData = todType?.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
+                    new[] { typeof(int), typeof(int), typeof(int) }, null);
+                if (getTileData != null)
+                {
+                    try { existing = getTileData.Invoke(null, new object[] { tileType, 0, 0 }); }
+                    catch (Exception ex)
+                    {
+                        LogMissingTileObjectData(tileType, $"GetTileData threw: {ex.GetType().Name}: {ex.Message}");
+                    }
+                    if (existing != null)
+                        return true;
+                }
+
+                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (dataField?.GetValue(null) is IList list &&
+                    tileType >= 0 &&
+                    tileType < list.Count &&
+                    list[tileType] != null)
+                {
+                    return true;
+                }
+
+                string reason;
+                if (getTileData == null)
+                {
+                    reason = "GetTileData method missing";
+                }
+                else if (!(dataField?.GetValue(null) is IList))
+                {
+                    reason = "TileObjectData._data missing";
+                }
+                else
+                {
+                    var dataList = dataField.GetValue(null) as IList;
+                    reason = dataList == null
+                        ? "TileObjectData._data null"
+                        : $"GetTileData=null and _data[{tileType}] missing (count={dataList.Count})";
+                }
+                LogMissingTileObjectData(tileType, reason);
+                return false;
+            }
+            catch
+            {
+                LogMissingTileObjectData(tileType, "unexpected exception in HasTileObjectData");
+                return false;
+            }
+        }
+
+        private static void LogMissingTileObjectData(int tileType, string reason)
+        {
+            try
+            {
+                if (!_loggedMissingTileObjectDataTypes.Add(tileType))
+                    return;
+
+                string name = TileRegistry.GetDefinition(tileType)?.DisplayName ?? "unknown";
+                _log?.Warn($"[TileBehaviorPatches] TileObjectData missing for tile {tileType} ({name}): {reason}");
+            }
+            catch { }
+        }
+
+        private static bool TryPlaceCustomMultiTile(int i, int j, int type, TileDefinition def, out int topX, out int topY)
+        {
+            topX = i;
+            topY = j;
+
+            if (def == null)
+                return false;
+
+            int width = Math.Max(1, def.Width);
+            int height = Math.Max(1, def.Height);
+            int originX = Math.Max(0, Math.Min(width - 1, def.OriginX));
+            int originY = Math.Max(0, Math.Min(height - 1, def.OriginY));
+
+            topX = i - originX;
+            topY = j - originY;
+
+            if (topX < 0 || topY < 0 || topX + width > Main.maxTilesX || topY + height > Main.maxTilesY)
+                return false;
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    var tile = Framing.GetTileSafely(topX + lx, topY + ly);
+                    if (tile == null)
+                        return false;
+
+                    // Never place over active tiles in fallback mode; this prevents overlap artifacts.
+                    if (tile.active())
+                        return false;
+                }
+            }
+
+            if (!HasBottomSupport(topX, topY, width, height))
+                return false;
+
+            int stepX = Math.Max(1, def.CoordinateWidth + Math.Max(0, def.CoordinatePadding));
+            int[] rowOffsets = BuildRowFrameOffsets(def, height);
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    int x = topX + lx;
+                    int y = topY + ly;
+                    var tile = Framing.GetTileSafely(x, y);
+                    tile.active(true);
+                    tile.type = (ushort)type;
+                    tile.frameX = (short)(lx * stepX);
+                    tile.frameY = (short)rowOffsets[ly];
+                }
+            }
+
+            WorldGen.RangeFrame(topX, topY, topX + width + 1, topY + height + 1);
+            return true;
+        }
+
+        private static void NormalizeMultiTileFrames(int topX, int topY, int type, TileDefinition def)
+        {
+            if (def == null)
+                return;
+
+            int width = Math.Max(1, def.Width);
+            int height = Math.Max(1, def.Height);
+            if (width <= 1 && height <= 1)
+                return;
+
+            if (topX < 0 || topY < 0 || topX + width > Main.maxTilesX || topY + height > Main.maxTilesY)
+                return;
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    var tile = Main.tile[topX + lx, topY + ly];
+                    if (tile == null || !tile.active() || tile.type != type)
+                        return;
+                }
+            }
+
+            int stepX = Math.Max(1, def.CoordinateWidth + Math.Max(0, def.CoordinatePadding));
+            int[] rowOffsets = BuildRowFrameOffsets(def, height);
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    var tile = Main.tile[topX + lx, topY + ly];
+                    tile.frameX = (short)(lx * stepX);
+                    tile.frameY = (short)rowOffsets[ly];
+                }
+            }
+
+            WorldGen.RangeFrame(topX, topY, topX + width + 1, topY + height + 1);
+        }
+
+        private static bool HasBottomSupport(int topX, int topY, int width, int height)
+        {
+            int supportY = topY + Math.Max(1, height);
+            if (supportY < 0 || supportY >= Main.maxTilesY)
+                return false;
+
+            var tileSolid = Main.tileSolid;
+            var tileSolidTop = Main.tileSolidTop;
+            if (tileSolid == null)
+                return false;
+
+            for (int lx = 0; lx < Math.Max(1, width); lx++)
+            {
+                int x = topX + lx;
+                if (x < 0 || x >= Main.maxTilesX)
+                    return false;
+
+                var support = Framing.GetTileSafely(x, supportY);
+                if (support == null || !support.active())
+                    return false;
+
+                int supportType = support.type;
+                if (supportType < 0 || supportType >= tileSolid.Length)
+                    return false;
+
+                bool solid = tileSolid[supportType];
+                bool solidTop = tileSolidTop != null &&
+                    supportType >= 0 &&
+                    supportType < tileSolidTop.Length &&
+                    tileSolidTop[supportType];
+                if (!solid && !solidTop)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static int[] BuildRowFrameOffsets(TileDefinition def, int height)
+        {
+            int[] result = new int[Math.Max(1, height)];
+            int[] coordHeights;
+            if (def.CoordinateHeights != null && def.CoordinateHeights.Length > 0)
+            {
+                coordHeights = def.CoordinateHeights;
+            }
+            else
+            {
+                coordHeights = new int[result.Length];
+                for (int i = 0; i < coordHeights.Length; i++)
+                    coordHeights[i] = 16;
+            }
+
+            int padding = Math.Max(0, def.CoordinatePadding);
+            int acc = 0;
+            for (int row = 0; row < result.Length; row++)
+            {
+                result[row] = acc;
+                int h = coordHeights[Math.Min(row, coordHeights.Length - 1)];
+                acc += Math.Max(1, h) + padding;
+            }
+
+            return result;
+        }
+
+        private static void InitializeContainerAt(int topX, int topY, TileDefinition def)
+        {
+            if (def == null || !def.IsContainer)
+                return;
+
+            int chestIndex = Chest.FindChest(topX, topY);
+            if (chestIndex < 0)
+                chestIndex = Chest.CreateChest(topX, topY, -1);
+
+            if (chestIndex < 0)
+                return;
+
+            var chest = Main.chest[chestIndex];
+            if (chest == null)
+                return;
+
+            if (def.ContainerCapacity > 0 && chest.maxItems != def.ContainerCapacity)
+            {
+                var resize = chest.GetType().GetMethod("Resize", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
+                resize?.Invoke(chest, new object[] { def.ContainerCapacity });
+            }
+
+            chest.name = string.IsNullOrEmpty(def.ContainerName) ? def.DisplayName : def.ContainerName;
+        }
+
         private static bool ChestHasItems(int chestIndex)
         {
             if (chestIndex < 0 || chestIndex >= Main.maxChests) return false;
@@ -435,6 +789,109 @@ namespace TerrariaModder.Core.Assets
             {
                 _log?.Debug($"[TileBehaviorPatches] Drop spawn failed: {ex.Message}");
             }
+        }
+
+        private static void BreakCustomMultiTile(int topX, int topY, TileDefinition def, bool effectOnly, bool noItem)
+        {
+            if (def == null) return;
+            if (effectOnly) return;
+
+            int width = Math.Max(1, def.Width);
+            int height = Math.Max(1, def.Height);
+            bool removedAny = false;
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    int x = topX + lx;
+                    int y = topY + ly;
+                    if (x < 0 || x >= Main.maxTilesX || y < 0 || y >= Main.maxTilesY)
+                        continue;
+
+                    var tile = Main.tile[x, y];
+                    if (tile == null || !tile.active())
+                        continue;
+
+                    if (!TileRegistry.IsCustomTile(tile.type))
+                        continue;
+
+                    tile.active(false);
+                    tile.type = 0;
+                    tile.frameX = 0;
+                    tile.frameY = 0;
+                    removedAny = true;
+                }
+            }
+
+            if (!removedAny)
+                return;
+
+            if (def.IsContainer)
+            {
+                RemoveCustomChest(topX, topY);
+            }
+
+            TryPlayTileSound(def.HitSoundStyle, topX, topY);
+
+            if (!effectOnly && !noItem && !string.IsNullOrEmpty(def.DropItemId))
+            {
+                int itemType = ItemRegistry.ResolveItemType(def.DropItemId);
+                if (itemType > 0)
+                    SpawnDropItem(topX, topY, itemType);
+            }
+
+            try { def.OnBreak?.Invoke(topX, topY); } catch { }
+        }
+
+        private static void RemoveCustomChest(int topX, int topY)
+        {
+            try
+            {
+                int chestIndex = Chest.FindChest(topX, topY);
+                if (chestIndex < 0)
+                    return;
+
+                Chest.RemoveChest(chestIndex);
+
+                if (Main.player != null)
+                {
+                    for (int p = 0; p < Main.player.Length; p++)
+                    {
+                        var player = Main.player[p];
+                        if (player != null && player.chest == chestIndex)
+                            player.chest = -1;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log?.Debug($"[TileBehaviorPatches] RemoveCustomChest failed: {ex.Message}");
+            }
+        }
+
+        private static void TryPlayTileSound(int soundId, int tileX, int tileY)
+        {
+            if (soundId < 0) return;
+
+            try
+            {
+                var seType = typeof(Main).Assembly.GetType("Terraria.Audio.SoundEngine");
+                if (seType == null)
+                    return;
+
+                foreach (var m in seType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                {
+                    if (m.Name != "PlaySound") continue;
+                    var p = m.GetParameters();
+                    if (p.Length == 6 && p[0].ParameterType == typeof(int))
+                    {
+                        m.Invoke(null, new object[] { soundId, tileX * 16, tileY * 16, 1, 1f, 0f });
+                        return;
+                    }
+                }
+            }
+            catch { }
         }
 
         internal static MethodInfo PlayerOpenChestMethod => _playerOpenChestMethod;
@@ -471,6 +928,13 @@ namespace TerrariaModder.Core.Assets
             return definition != null;
         }
 
+        private struct FrameLayout
+        {
+            public int CoordinateWidth;
+            public int CoordinatePadding;
+            public int[] CoordinateHeights;
+        }
+
         public static bool TryGetTopLeft(int tileX, int tileY, TileDefinition definition, out int topX, out int topY)
         {
             topX = tileX;
@@ -482,18 +946,390 @@ namespace TerrariaModder.Core.Assets
             var tile = Main.tile[tileX, tileY];
             if (tile == null) return false;
 
+            int tileType = tile.type;
             int width = Math.Max(1, definition.Width);
             int height = Math.Max(1, definition.Height);
 
-            int frameTileX = tile.frameX / 18;
-            int frameTileY = tile.frameY / 18;
+            var layouts = BuildFrameLayouts(tileType, definition, height);
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                if (TryResolveTopLeftFromLayout(
+                    tileX, tileY, tile.frameX, tile.frameY, tileType, width, height, layouts[i], out topX, out topY))
+                {
+                    return true;
+                }
+            }
 
-            int localX = frameTileX % width;
-            int localY = frameTileY % height;
+            // Last-resort best effort based on definition values.
+            int fallbackStepX = Math.Max(1, definition.CoordinateWidth + Math.Max(0, definition.CoordinatePadding));
+            int fallbackLocalX = PositiveModulo(tile.frameX / fallbackStepX, width);
+            int fallbackLocalY = GetLocalFrameRow(
+                tile.frameY,
+                definition.CoordinateHeights,
+                Math.Max(0, definition.CoordinatePadding),
+                height);
 
-            topX = tileX - localX;
-            topY = tileY - localY;
+            topX = tileX - fallbackLocalX;
+            topY = tileY - fallbackLocalY;
             return true;
+        }
+
+        private static List<FrameLayout> BuildFrameLayouts(int tileType, TileDefinition definition, int height)
+        {
+            var layouts = new List<FrameLayout>(4);
+
+            if (TryGetRuntimeFrameLayout(tileType, height, out var runtimeLayout))
+            {
+                layouts.Add(runtimeLayout);
+
+                if (runtimeLayout.CoordinatePadding > 0)
+                {
+                    var noPaddingRuntimeLayout = runtimeLayout;
+                    noPaddingRuntimeLayout.CoordinatePadding = 0;
+                    if (!ContainsEquivalentLayout(layouts, noPaddingRuntimeLayout))
+                        layouts.Add(noPaddingRuntimeLayout);
+                }
+            }
+
+            var defLayout = new FrameLayout
+            {
+                CoordinateWidth = Math.Max(1, definition?.CoordinateWidth ?? 16),
+                CoordinatePadding = Math.Max(0, definition?.CoordinatePadding ?? 0),
+                CoordinateHeights = definition?.CoordinateHeights != null && definition.CoordinateHeights.Length > 0
+                    ? (int[])definition.CoordinateHeights.Clone()
+                    : BuildDefaultCoordinateHeights(height)
+            };
+
+            if (!ContainsEquivalentLayout(layouts, defLayout))
+                layouts.Add(defLayout);
+
+            if (defLayout.CoordinatePadding > 0)
+            {
+                var noPaddingDefLayout = defLayout;
+                noPaddingDefLayout.CoordinatePadding = 0;
+                if (!ContainsEquivalentLayout(layouts, noPaddingDefLayout))
+                    layouts.Add(noPaddingDefLayout);
+            }
+
+            return layouts;
+        }
+
+        private static bool TryGetRuntimeFrameLayout(int tileType, int height, out FrameLayout layout)
+        {
+            layout = default;
+
+            try
+            {
+                var todType = typeof(Main).Assembly.GetType("Terraria.ObjectData.TileObjectData");
+                if (todType == null)
+                    return false;
+
+                object data = TryGetTileObjectData(todType, tileType);
+                if (data == null)
+                    return false;
+
+                int coordinateWidth = ReadIntMember(data, "CoordinateWidth");
+                int coordinatePadding = ReadIntMember(data, "CoordinatePadding");
+                int[] coordinateHeights = ReadIntArrayMember(data, "CoordinateHeights");
+
+                layout = new FrameLayout
+                {
+                    CoordinateWidth = coordinateWidth > 0 ? coordinateWidth : 16,
+                    CoordinatePadding = Math.Max(0, coordinatePadding),
+                    CoordinateHeights = coordinateHeights != null && coordinateHeights.Length > 0
+                        ? coordinateHeights
+                        : BuildDefaultCoordinateHeights(height)
+                };
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static object TryGetTileObjectData(Type todType, int tileType)
+        {
+            try
+            {
+                var getTileData = todType.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
+                    new[] { typeof(int), typeof(int), typeof(int) }, null);
+                if (getTileData != null)
+                {
+                    object data = null;
+                    try { data = getTileData.Invoke(null, new object[] { tileType, 0, 0 }); }
+                    catch { }
+                    if (data != null)
+                        return data;
+                }
+
+                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                if (dataField?.GetValue(null) is IList list &&
+                    tileType >= 0 &&
+                    tileType < list.Count)
+                {
+                    return list[tileType];
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static int ReadIntMember(object instance, string memberName)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return 0;
+
+            try
+            {
+                var type = instance.GetType();
+                var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                    return Convert.ToInt32(field.GetValue(instance));
+
+                var prop = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (prop != null && prop.CanRead)
+                    return Convert.ToInt32(prop.GetValue(instance, null));
+            }
+            catch { }
+
+            return 0;
+        }
+
+        private static int[] ReadIntArrayMember(object instance, string memberName)
+        {
+            if (instance == null || string.IsNullOrEmpty(memberName))
+                return null;
+
+            try
+            {
+                object raw = null;
+                var type = instance.GetType();
+                var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                {
+                    raw = field.GetValue(instance);
+                }
+                else
+                {
+                    var prop = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (prop != null && prop.CanRead)
+                        raw = prop.GetValue(instance, null);
+                }
+
+                if (raw is int[] ints)
+                    return ints.Length > 0 ? (int[])ints.Clone() : null;
+
+                if (raw is short[] shorts)
+                {
+                    if (shorts.Length == 0) return null;
+                    var arr = new int[shorts.Length];
+                    for (int i = 0; i < shorts.Length; i++) arr[i] = shorts[i];
+                    return arr;
+                }
+
+                if (raw is IList list)
+                {
+                    if (list.Count == 0) return null;
+                    var arr = new int[list.Count];
+                    for (int i = 0; i < list.Count; i++)
+                        arr[i] = Convert.ToInt32(list[i]);
+                    return arr;
+                }
+            }
+            catch { }
+
+            return null;
+        }
+
+        private static bool ContainsEquivalentLayout(List<FrameLayout> layouts, FrameLayout candidate)
+        {
+            if (layouts == null)
+                return false;
+
+            for (int i = 0; i < layouts.Count; i++)
+            {
+                var existing = layouts[i];
+                if (existing.CoordinateWidth != candidate.CoordinateWidth)
+                    continue;
+                if (existing.CoordinatePadding != candidate.CoordinatePadding)
+                    continue;
+                if (!AreIntArraysEqual(existing.CoordinateHeights, candidate.CoordinateHeights))
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool AreIntArraysEqual(int[] a, int[] b)
+        {
+            if (ReferenceEquals(a, b))
+                return true;
+            if (a == null || b == null)
+                return false;
+            if (a.Length != b.Length)
+                return false;
+
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryResolveTopLeftFromLayout(
+            int tileX,
+            int tileY,
+            int frameX,
+            int frameY,
+            int tileType,
+            int width,
+            int height,
+            FrameLayout layout,
+            out int topX,
+            out int topY)
+        {
+            topX = tileX;
+            topY = tileY;
+
+            int stepX = Math.Max(1, layout.CoordinateWidth + Math.Max(0, layout.CoordinatePadding));
+            int frameTileX = frameX / stepX;
+            int localX = PositiveModulo(frameTileX, width);
+            int localY = GetLocalFrameRow(frameY, layout.CoordinateHeights, layout.CoordinatePadding, height);
+
+            int candidateTopX = tileX - localX;
+            int candidateTopY = tileY - localY;
+
+            if (!IsTopLeftCandidate(candidateTopX, candidateTopY, tileType, width, height, layout))
+                return false;
+
+            topX = candidateTopX;
+            topY = candidateTopY;
+            return true;
+        }
+
+        private static bool IsTopLeftCandidate(int topX, int topY, int tileType, int width, int height, FrameLayout layout)
+        {
+            if (topX < 0 || topY < 0 || topX + width > Main.maxTilesX || topY + height > Main.maxTilesY)
+                return false;
+
+            int stepX = Math.Max(1, layout.CoordinateWidth + Math.Max(0, layout.CoordinatePadding));
+            int patternWidth = Math.Max(1, stepX * Math.Max(1, width));
+            int patternHeight = ComputePatternHeight(layout.CoordinateHeights, layout.CoordinatePadding, height);
+            int[] rowOffsets = BuildRowOffsets(layout.CoordinateHeights, layout.CoordinatePadding, height);
+
+            for (int lx = 0; lx < width; lx++)
+            {
+                for (int ly = 0; ly < height; ly++)
+                {
+                    var tile = Main.tile[topX + lx, topY + ly];
+                    if (tile == null || !tile.active() || tile.type != tileType)
+                        return false;
+
+                    int expectedX = lx * stepX;
+                    int actualX = PositiveModulo(tile.frameX, patternWidth);
+                    if (actualX != expectedX)
+                        return false;
+
+                    int expectedY = rowOffsets[ly];
+                    int actualY = PositiveModulo(tile.frameY, patternHeight);
+                    if (actualY != expectedY)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int GetLocalFrameRow(int frameY, int[] coordinateHeights, int coordinatePadding, int height)
+        {
+            if (height <= 1)
+                return 0;
+
+            int patternHeight = ComputePatternHeight(coordinateHeights, coordinatePadding, height);
+            if (patternHeight <= 0)
+                return 0;
+
+            int wrapped = PositiveModulo(frameY, patternHeight);
+            int[] rowHeights = coordinateHeights != null && coordinateHeights.Length > 0
+                ? coordinateHeights
+                : BuildDefaultCoordinateHeights(height);
+            int padding = Math.Max(0, coordinatePadding);
+            int acc = 0;
+            for (int row = 0; row < height; row++)
+            {
+                int rowHeight = rowHeights[Math.Min(row, rowHeights.Length - 1)];
+                int rowStep = Math.Max(1, rowHeight) + padding;
+                if (wrapped < acc + rowStep)
+                    return row;
+                acc += rowStep;
+            }
+
+            return 0;
+        }
+
+        private static int[] BuildRowOffsets(int[] coordinateHeights, int coordinatePadding, int height)
+        {
+            int rowCount = Math.Max(1, height);
+            int[] rowHeights = coordinateHeights != null && coordinateHeights.Length > 0
+                ? coordinateHeights
+                : BuildDefaultCoordinateHeights(rowCount);
+            int padding = Math.Max(0, coordinatePadding);
+
+            int[] offsets = new int[rowCount];
+            int acc = 0;
+            for (int row = 0; row < rowCount; row++)
+            {
+                offsets[row] = acc;
+                int rowHeight = rowHeights[Math.Min(row, rowHeights.Length - 1)];
+                acc += Math.Max(1, rowHeight) + padding;
+            }
+
+            return offsets;
+        }
+
+        private static int ComputePatternHeight(int[] coordinateHeights, int coordinatePadding, int height)
+        {
+            int rowCount = Math.Max(1, height);
+            int[] rowHeights = coordinateHeights != null && coordinateHeights.Length > 0
+                ? coordinateHeights
+                : BuildDefaultCoordinateHeights(rowCount);
+            int padding = Math.Max(0, coordinatePadding);
+
+            int total = 0;
+            for (int row = 0; row < rowCount; row++)
+            {
+                int rowHeight = rowHeights[Math.Min(row, rowHeights.Length - 1)];
+                total += Math.Max(1, rowHeight) + padding;
+            }
+
+            return Math.Max(1, total);
+        }
+
+        private static int PositiveModulo(int value, int modulus)
+        {
+            if (modulus <= 0)
+                return 0;
+
+            int result = value % modulus;
+            if (result < 0)
+                result += modulus;
+
+            return result;
+        }
+
+        private static int[] BuildDefaultCoordinateHeights(int height)
+        {
+            int[] arr = new int[Math.Max(1, height)];
+            for (int i = 0; i < arr.Length; i++)
+                arr[i] = 16;
+            return arr;
         }
 
         public static bool TryOpenContainer(Player player, int tileX, int tileY, TileDefinition definition)
