@@ -28,16 +28,10 @@ namespace VeinMiner
         private int _activationWindowMs = 900;
         private int _maxVeinBlocks = 64;
         private bool _useOreSet = true;
-        private bool _requireMiningTool = true;
-        private bool _allowPickaxes = true;
-        private bool _allowDrills = true;
         private string _tileWhitelistCsv = "";
-        private string _toolWhitelistCsv = "";
 
         private readonly HashSet<int> _allowedTiles = new HashSet<int>();
-        private readonly HashSet<int> _allowedTools = new HashSet<int>();
         private readonly Dictionary<string, int> _tileNameMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, int> _itemNameMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         private long _activationUntilTicksUtc;
         private bool _isVeinMining;
@@ -220,16 +214,7 @@ namespace VeinMiner
 
             Item item = player.HeldItem;
             if (item == null || item.IsAir) return false;
-
-            if (_allowedTools.Contains(item.type)) return true;
-            if (!_requireMiningTool) return true;
-            if (item.pick <= 0) return false;
-
-            string itemName = item.Name ?? "";
-            bool isDrill = itemName.IndexOf("drill", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool isPickaxe = !isDrill;
-
-            return (isDrill && _allowDrills) || (isPickaxe && _allowPickaxes);
+            return item.pick > 0;
         }
 
         private bool IsActivationOpen()
@@ -258,10 +243,6 @@ namespace VeinMiner
             _maxVeinBlocks = _context.Config.Get("maxVeinBlocks", 64);
             _useOreSet = _context.Config.Get("useOreSet", true);
             _tileWhitelistCsv = _context.Config.Get("tileWhitelist", "");
-            _requireMiningTool = _context.Config.Get("requireMiningTool", true);
-            _allowPickaxes = _context.Config.Get("allowPickaxes", true);
-            _allowDrills = _context.Config.Get("allowDrills", true);
-            _toolWhitelistCsv = _context.Config.Get("toolWhitelist", "");
 
             if (_activationWindowMs < 100) _activationWindowMs = 100;
             if (_maxVeinBlocks < 1) _maxVeinBlocks = 1;
@@ -270,7 +251,6 @@ namespace VeinMiner
         private void RebuildWhitelists()
         {
             _allowedTiles.Clear();
-            _allowedTools.Clear();
 
             if (_useOreSet && TileID.Sets.Ore != null)
             {
@@ -284,7 +264,6 @@ namespace VeinMiner
             }
 
             AddCsvTokensToSet(_tileWhitelistCsv, _tileNameMap, _allowedTiles);
-            AddCsvTokensToSet(_toolWhitelistCsv, _itemNameMap, _allowedTools);
         }
 
         private static void AddCsvTokensToSet(string csv, Dictionary<string, int> lookup, HashSet<int> target)
@@ -313,9 +292,7 @@ namespace VeinMiner
         private void BuildNameMaps()
         {
             _tileNameMap.Clear();
-            _itemNameMap.Clear();
             BuildIdNameMap(typeof(TileID), _tileNameMap);
-            BuildIdNameMap(typeof(ItemID), _itemNameMap);
         }
 
         private static void BuildIdNameMap(Type idType, Dictionary<string, int> map)

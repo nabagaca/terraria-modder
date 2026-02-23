@@ -6,7 +6,7 @@ Mine connected ore with one activation key press.
 
 - Keybind-gated vein mining (default key: backtick / `OemTilde`)
 - Ores enabled by default via `TileID.Sets.Ore`
-- Optional tile and tool whitelists (TileID/ItemID names or numeric IDs)
+- Optional tile whitelist (TileID names or numeric IDs)
 - Safety cap (`maxVeinBlocks`) to limit per-trigger mining work
 
 ## In-Game Configuration (F6)
@@ -19,8 +19,6 @@ Key settings:
 - `maxVeinBlocks`: maximum extra connected blocks to mine
 - `useOreSet`: include all ore tiles automatically
 - `tileWhitelist`: extra allowed tile types (CSV names/IDs)
-- `requireMiningTool`, `allowPickaxes`, `allowDrills`
-- `toolWhitelist`: extra allowed tools (CSV names/IDs)
 
 ## Keybind
 

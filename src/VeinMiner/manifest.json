@@ -48,30 +48,6 @@
       "default": "",
       "label": "Extra Tile Whitelist",
       "description": "Comma-separated TileID names or numeric IDs to allow (for example: Hellstone, Chlorophyte, 22)."
-    },
-    "requireMiningTool": {
-      "type": "bool",
-      "default": true,
-      "label": "Require Mining Tool",
-      "description": "Require the held tool to pass pickaxe/drill rules or tool whitelist."
-    },
-    "allowPickaxes": {
-      "type": "bool",
-      "default": true,
-      "label": "Allow Pickaxes",
-      "description": "Allow pickaxe-class tools (based on item.pick and name heuristic)."
-    },
-    "allowDrills": {
-      "type": "bool",
-      "default": true,
-      "label": "Allow Drills",
-      "description": "Allow drill-class tools (based on item.pick and name containing 'drill')."
-    },
-    "toolWhitelist": {
-      "type": "string",
-      "default": "",
-      "label": "Extra Tool Whitelist",
-      "description": "Comma-separated ItemID names or numeric IDs to allow as vein-mining tools."
     }
   },
   "keybinds": [
