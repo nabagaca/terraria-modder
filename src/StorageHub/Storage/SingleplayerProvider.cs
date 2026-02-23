@@ -63,6 +63,25 @@ namespace StorageHub.Storage
         private static FieldInfo _itemCreateTileField;
         private static FieldInfo _itemCreateWallField;
         private static FieldInfo _itemMaterialField;
+        private static FieldInfo _itemVanityField;
+        private static FieldInfo _itemAmmoField;
+        private static FieldInfo _itemNotAmmoField;
+        private static FieldInfo _itemMeleeField;
+        private static FieldInfo _itemRangedField;
+        private static FieldInfo _itemMagicField;
+        private static FieldInfo _itemSummonField;
+        private static FieldInfo _itemThrownField;
+        private static FieldInfo _itemSentryField;
+        private static FieldInfo _itemShootField;
+        private static FieldInfo _itemHealLifeField;
+        private static FieldInfo _itemHealManaField;
+        private static FieldInfo _itemPotionField;
+        private static FieldInfo _itemDyeField;
+        private static FieldInfo _itemHairDyeField;
+        private static FieldInfo _itemMountTypeField;
+        private static FieldInfo _itemBuffTypeField;
+        private static FieldInfo _itemFishingPoleField;
+        private static FieldInfo _itemBaitField;
 
         private static FieldInfo _playerInventoryField;
         private static FieldInfo _playerBankField;
@@ -138,6 +157,25 @@ namespace StorageHub.Storage
                     _itemCreateTileField = _itemType.GetField("createTile", BindingFlags.Public | BindingFlags.Instance);
                     _itemCreateWallField = _itemType.GetField("createWall", BindingFlags.Public | BindingFlags.Instance);
                     _itemMaterialField = _itemType.GetField("material", BindingFlags.Public | BindingFlags.Instance);
+                    _itemVanityField = _itemType.GetField("vanity", BindingFlags.Public | BindingFlags.Instance);
+                    _itemAmmoField = _itemType.GetField("ammo", BindingFlags.Public | BindingFlags.Instance);
+                    _itemNotAmmoField = _itemType.GetField("notAmmo", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMeleeField = _itemType.GetField("melee", BindingFlags.Public | BindingFlags.Instance);
+                    _itemRangedField = _itemType.GetField("ranged", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMagicField = _itemType.GetField("magic", BindingFlags.Public | BindingFlags.Instance);
+                    _itemSummonField = _itemType.GetField("summon", BindingFlags.Public | BindingFlags.Instance);
+                    _itemThrownField = _itemType.GetField("thrown", BindingFlags.Public | BindingFlags.Instance);
+                    _itemSentryField = _itemType.GetField("sentry", BindingFlags.Public | BindingFlags.Instance);
+                    _itemShootField = _itemType.GetField("shoot", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHealLifeField = _itemType.GetField("healLife", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHealManaField = _itemType.GetField("healMana", BindingFlags.Public | BindingFlags.Instance);
+                    _itemPotionField = _itemType.GetField("potion", BindingFlags.Public | BindingFlags.Instance);
+                    _itemDyeField = _itemType.GetField("dye", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHairDyeField = _itemType.GetField("hairDye", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMountTypeField = _itemType.GetField("mountType", BindingFlags.Public | BindingFlags.Instance);
+                    _itemBuffTypeField = _itemType.GetField("buffType", BindingFlags.Public | BindingFlags.Instance);
+                    _itemFishingPoleField = _itemType.GetField("fishingPole", BindingFlags.Public | BindingFlags.Instance);
+                    _itemBaitField = _itemType.GetField("bait", BindingFlags.Public | BindingFlags.Instance);
                 }
 
                 if (_playerType != null)
@@ -1178,6 +1216,43 @@ namespace StorageHub.Storage
                 int createTile = GetSafeInt(_itemCreateTileField, item, -1);
                 int createWall = GetSafeInt(_itemCreateWallField, item, -1);
                 bool material = GetSafeBool(_itemMaterialField, item);
+                bool vanity = GetSafeBool(_itemVanityField, item);
+                int ammo = GetSafeInt(_itemAmmoField, item, 0);
+                bool notAmmo = GetSafeBool(_itemNotAmmoField, item);
+                bool melee = GetSafeBool(_itemMeleeField, item);
+                bool ranged = GetSafeBool(_itemRangedField, item);
+                bool magic = GetSafeBool(_itemMagicField, item);
+                bool summon = GetSafeBool(_itemSummonField, item);
+                bool thrown = GetSafeBool(_itemThrownField, item);
+                bool sentry = GetSafeBool(_itemSentryField, item);
+                int shoot = GetSafeInt(_itemShootField, item, 0);
+                int healLife = GetSafeInt(_itemHealLifeField, item, 0);
+                int healMana = GetSafeInt(_itemHealManaField, item, 0);
+                bool potion = GetSafeBool(_itemPotionField, item);
+                int dye = GetSafeInt(_itemDyeField, item, 0);
+                int hairDye = GetSafeInt(_itemHairDyeField, item, -1);
+                int mountType = GetSafeInt(_itemMountTypeField, item, -1);
+                int buffType = GetSafeInt(_itemBuffTypeField, item, 0);
+                int fishingPole = GetSafeInt(_itemFishingPoleField, item, 0);
+                int bait = GetSafeInt(_itemBaitField, item, 0);
+
+                bool isTool = pick > 0 || axe > 0 || hammer > 0;
+                bool isWeapon = damage > 0 && !isTool && ammo == 0;
+                bool isMelee = melee && isWeapon;
+                bool isRanged = ranged && isWeapon;
+                bool isMagic = magic && isWeapon;
+                bool isSummon = (summon || sentry) && isWeapon;
+                bool isThrown = thrown && damage > 0 && (ammo == 0 || notAmmo) && shoot > 0;
+                if (!isMelee && !isRanged && !isMagic && !isSummon && !isThrown && isWeapon)
+                    isMelee = true; // Fallback for versions where class flags are unavailable
+
+                bool isAmmo = ammo > 0 && damage > 0;
+                bool isPlaceable = createTile >= 0 || createWall >= 0;
+                bool isVanity = vanity || dye > 0 || hairDye >= 0;
+                bool isPotion = consumable && (healLife > 0 || healMana > 0 || buffType > 0 || potion);
+                bool isFishing = fishingPole > 0 || bait > 0;
+                bool isEquipment = accessory || mountType >= 0 || buffType > 0 || isFishing;
+                bool isMaterial = material && !isPlaceable && !isWeapon && !isTool && !accessory && !isVanity;
 
                 return new ItemSnapshot(
                     itemType,
@@ -1190,13 +1265,31 @@ namespace StorageHub.Storage
                     sourceSlot,
                     damage: damage > 0 ? damage : (int?)null,
                     isPickaxe: pick > 0,
+                    pickPower: pick,
                     isAxe: axe > 0,
+                    axePower: axe,
                     isHammer: hammer > 0,
-                    isArmor: headSlot >= 0 || bodySlot >= 0 || legSlot >= 0,
+                    hammerPower: hammer,
+                    isArmor: !vanity && (headSlot >= 0 || bodySlot >= 0 || legSlot >= 0),
                     isAccessory: accessory,
                     isConsumable: consumable,
-                    isPlaceable: createTile >= 0 || createWall >= 0,
-                    isMaterial: material
+                    isPlaceable: isPlaceable,
+                    isMaterial: isMaterial,
+                    isVanity: isVanity,
+                    isAmmo: isAmmo,
+                    ammoType: ammo,
+                    isPotion: isPotion,
+                    healLife: healLife,
+                    healMana: healMana,
+                    isFishing: isFishing,
+                    fishingPolePower: fishingPole,
+                    fishingBaitPower: bait,
+                    isEquipment: isEquipment,
+                    isMelee: isMelee,
+                    isRanged: isRanged,
+                    isMagic: isMagic,
+                    isSummon: isSummon,
+                    isThrown: isThrown
                 );
             }
             catch (Exception ex)
@@ -1216,7 +1309,8 @@ namespace StorageHub.Storage
             {
                 var val = field.GetValue(obj);
                 if (val == null) return defaultValue;
-                return (int)val;
+                if (val is int i) return i;
+                return Convert.ToInt32(val);
             }
             catch
             {
@@ -1234,7 +1328,8 @@ namespace StorageHub.Storage
             {
                 var val = field.GetValue(obj);
                 if (val == null) return false;
-                return (bool)val;
+                if (val is bool b) return b;
+                return Convert.ToBoolean(val);
             }
             catch
             {

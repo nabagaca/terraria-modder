@@ -176,7 +176,7 @@ namespace TerrariaModder.Core.Assets
             item.useAmmo = def.UseAmmo;
 
             // Placement
-            item.createTile = def.CreateTile;
+            item.createTile = ResolveCreateTile(def);
             item.createWall = def.CreateWall;
             item.placeStyle = def.PlaceStyle;
 
@@ -200,6 +200,20 @@ namespace TerrariaModder.Core.Assets
 
             // Ensure stack is at least 1 for non-air items
             if (item.stack <= 0) item.stack = 1;
+        }
+
+        private static int ResolveCreateTile(ItemDefinition def)
+        {
+            if (!string.IsNullOrWhiteSpace(def.CreateTileId))
+            {
+                int resolved = AssetSystem.ResolveTileType(def.CreateTileId);
+                if (resolved >= 0)
+                    return resolved;
+
+                _log?.Warn($"[SetDefaultsPatch] Could not resolve CreateTileId '{def.CreateTileId}', using CreateTile={def.CreateTile}");
+            }
+
+            return def.CreateTile;
         }
 
         private static bool[] _materialSet;

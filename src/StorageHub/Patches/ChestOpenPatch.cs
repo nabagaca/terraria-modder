@@ -30,13 +30,18 @@ namespace StorageHub.Patches
         private static FieldInfo _playerArrayField;
         private static FieldInfo _myPlayerField;
         private static FieldInfo _chestArrayField;
+        private static FieldInfo _tileArrayField;
         private static FieldInfo _playerChestField;
         private static FieldInfo _chestXField;
         private static FieldInfo _chestYField;
+        private static FieldInfo _tileTypeField;
+        private static MethodInfo _tileActiveMethod;
 
         // State tracking
         private int _lastChestIndex = -1;
         private bool _initialized = false;
+        private bool _dedicatedBlocksOnly;
+        private int _requiredTileType = -1;
 
         public ChestOpenDetector(ILogger log, ChestRegistry registry)
         {
@@ -58,6 +63,7 @@ namespace StorageHub.Patches
                     _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
                     _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
                     _chestArrayField = _mainType.GetField("chest", BindingFlags.Public | BindingFlags.Static);
+                    _tileArrayField = _mainType.GetField("tile", BindingFlags.Public | BindingFlags.Static);
                 }
 
                 var playerType = Type.GetType("Terraria.Player, Terraria")
@@ -74,9 +80,17 @@ namespace StorageHub.Patches
                     _chestYField = _chestType.GetField("y", BindingFlags.Public | BindingFlags.Instance);
                 }
 
+                var tileType = Type.GetType("Terraria.Tile, Terraria")
+                    ?? Assembly.Load("Terraria").GetType("Terraria.Tile");
+                if (tileType != null)
+                {
+                    _tileTypeField = tileType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
+                    _tileActiveMethod = tileType.GetMethod("active", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                }
+
                 _initialized = _playerArrayField != null && _myPlayerField != null &&
-                              _playerChestField != null && _chestArrayField != null &&
-                              _chestXField != null && _chestYField != null;
+                               _playerChestField != null && _chestArrayField != null &&
+                               _chestXField != null && _chestYField != null;
 
                 if (_initialized)
                 {
@@ -183,6 +197,16 @@ namespace StorageHub.Patches
                 // Terraria prevents opening locked chests anyway
 
                 // Register the chest
+                if (_dedicatedBlocksOnly && _requiredTileType >= 0)
+                {
+                    int tileType = GetTileTypeAt(x, y);
+                    if (tileType != _requiredTileType)
+                    {
+                        _log.Debug($"Skipped chest at ({x}, {y}) - tile type {tileType}, requires {_requiredTileType}");
+                        return;
+                    }
+                }
+
                 if (_registry.RegisterChest(x, y))
                 {
                     _log.Debug($"Registered chest at ({x}, {y}) - index {chestIndex}");
@@ -200,6 +224,44 @@ namespace StorageHub.Patches
         public void Reset()
         {
             _lastChestIndex = -1;
+        }
+
+        public void SetDedicatedMode(bool dedicatedBlocksOnly, int requiredTileType)
+        {
+            _dedicatedBlocksOnly = dedicatedBlocksOnly;
+            _requiredTileType = requiredTileType;
+            _log.Debug($"ChestOpenDetector dedicated mode: enabled={_dedicatedBlocksOnly}, tileType={_requiredTileType}");
+        }
+
+        private int GetTileTypeAt(int x, int y)
+        {
+            try
+            {
+                if (_tileArrayField == null || _tileTypeField == null)
+                    return -1;
+
+                var tiles = _tileArrayField.GetValue(null) as Array;
+                if (tiles == null) return -1;
+
+                object tile = tiles.GetValue(x, y);
+                if (tile == null) return -1;
+
+                if (_tileActiveMethod != null)
+                {
+                    object activeObj = _tileActiveMethod.Invoke(tile, null);
+                    if (activeObj is bool active && !active)
+                        return -1;
+                }
+
+                var typeVal = _tileTypeField.GetValue(tile);
+                if (typeVal == null) return -1;
+
+                return Convert.ToInt32(typeVal);
+            }
+            catch
+            {
+                return -1;
+            }
         }
     }
 }

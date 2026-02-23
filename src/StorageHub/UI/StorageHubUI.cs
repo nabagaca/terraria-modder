@@ -51,7 +51,7 @@ namespace StorageHub.UI
         private int _activeTab = TabItems;
 
         // UI Components
-        private readonly TextInput _searchInput = new TextInput("Search...", 200);
+        private readonly TextInput _searchInput = new TextInput("Search / #tag...", 200);
         private readonly ScrollView _scrollView = new ScrollView();
         private readonly ItemSlotGrid _itemGrid = new ItemSlotGrid();
 
@@ -525,7 +525,7 @@ namespace StorageHub.UI
             }
             else
             {
-                UIRenderer.DrawText("L=Take  R=+1  Shift=Inv  Mid=Fav", x, y + height - 18, UIColors.TextHint);
+                UIRenderer.DrawText("L=Take  R=+1  Shift=Inv  Mid=Fav  (#weapon #potion -#fav)", x, y + height - 18, UIColors.TextHint);
             }
 
             // Deferred tooltip (drawn last, on top)
@@ -605,7 +605,8 @@ namespace StorageHub.UI
             DrawItemsSortButton(xPos, y, 80, btnHeight, "Stack", SortMode.Stack); xPos += 84;
             DrawItemsSortButton(xPos, y, 80, btnHeight, "Rarity", SortMode.Rarity); xPos += 84;
             DrawItemsSortButton(xPos, y, 80, btnHeight, "Type", SortMode.Type); xPos += 84;
-            DrawItemsSortButton(xPos, y, 80, btnHeight, "Recent", SortMode.Recent);
+            DrawItemsSortButton(xPos, y, 80, btnHeight, "Recent", SortMode.Recent); xPos += 84;
+            DrawItemsSortButton(xPos, y, 80, btnHeight, "Magic", SortMode.MagicDefault);
         }
 
         private void DrawItemsSortButton(int x, int y, int btnWidth, int btnHeight, string text, SortMode mode)
@@ -651,7 +652,7 @@ namespace StorageHub.UI
 
         private void FilterItems()
         {
-            string search = _searchInput.Text.ToLower();
+            var query = MagicSearchQuery.Parse(_searchInput.Text);
             _filteredItems = new List<ItemSnapshot>();
 
             foreach (var item in _allItems)
@@ -660,12 +661,15 @@ namespace StorageHub.UI
                 if (item.SourceChestIndex < 0)
                     continue;
 
-                // Apply search filter
-                if (!string.IsNullOrEmpty(search) && !item.Name.ToLower().Contains(search))
+                var traits = ItemSearchTraitsBuilder.FromSnapshot(item);
+                bool isFavorite = _config.FavoriteItems.Contains(item.ItemId);
+
+                // Apply text/tag search filter
+                if (!query.Matches(item.Name, tag => MagicSearchQuery.MatchesTag(traits, tag, isFavorite)))
                     continue;
 
                 // Apply category filter
-                if (_config.ItemCategoryFilter != CategoryFilter.All && !MatchesCategory(item, _config.ItemCategoryFilter))
+                if (_config.ItemCategoryFilter != CategoryFilter.All && traits.PrimaryCategory != _config.ItemCategoryFilter)
                     continue;
 
                 _filteredItems.Add(item);
@@ -687,36 +691,10 @@ namespace StorageHub.UI
                     SortMode.Rarity => dir * a.Rarity.CompareTo(b.Rarity),
                     SortMode.Type => dir * a.ItemId.CompareTo(b.ItemId),
                     SortMode.Recent => 0,
+                    SortMode.MagicDefault => dir * MagicSearchQuery.CompareMagicDefault(a, b),
                     _ => dir * string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase)
                 };
             });
-        }
-
-        private bool MatchesCategory(ItemSnapshot item, CategoryFilter filter)
-        {
-            // Use priority-based classification (same order as CraftTab/RecipesTab)
-            // Tools have damage, placeables are consumable — priority order resolves overlaps
-            var cat = ClassifyItem(item);
-            return filter == cat;
-        }
-
-        private CategoryFilter ClassifyItem(ItemSnapshot item)
-        {
-            if (item.IsPickaxe || item.IsAxe || item.IsHammer)
-                return CategoryFilter.Tools;
-            if (item.Damage > 0)
-                return CategoryFilter.Weapons;
-            if (item.IsArmor)
-                return CategoryFilter.Armor;
-            if (item.IsAccessory)
-                return CategoryFilter.Accessories;
-            if (item.IsPlaceable)
-                return CategoryFilter.Placeable;
-            if (item.IsConsumable)
-                return CategoryFilter.Consumables;
-            if (item.IsMaterial)
-                return CategoryFilter.Materials;
-            return CategoryFilter.Misc;
         }
 
         private void OnItemClick(ItemSnapshot item, int index, bool isRightClick, bool isShiftHeld, bool isPingMode)

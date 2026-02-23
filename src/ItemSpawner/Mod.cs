@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using TerrariaModder.Core.Assets;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Input;
@@ -129,6 +130,8 @@ namespace ItemSpawner
         {
             try
             {
+                _allItems.Clear();
+
                 var itemIdType = Type.GetType("Terraria.ID.ItemID, Terraria")
                     ?? Assembly.Load("Terraria").GetType("Terraria.ID.ItemID");
 
@@ -156,17 +159,29 @@ namespace ItemSpawner
                     return;
                 }
 
+                var candidateTypes = new HashSet<int>();
+                for (int i = 1; i < itemCount; i++)
+                {
+                    candidateTypes.Add(i);
+                }
+
+                int customTypesAdded = AddRegisteredCustomTypes(candidateTypes);
+                if (customTypesAdded > 0)
+                {
+                    _log.Info($"Added {customTypesAdded} custom runtime item IDs to ItemSpawner catalog scan");
+                }
+
                 int paramCount = _itemSetDefaultsIntMethod.GetParameters().Length;
 
-                for (int i = 1; i < itemCount; i++)
+                foreach (int type in candidateTypes.OrderBy(t => t))
                 {
                     try
                     {
                         var item = Activator.CreateInstance(_itemType);
 
                         object[] args = paramCount >= 2
-                            ? new object[] { i, null }
-                            : new object[] { i };
+                            ? new object[] { type, null }
+                            : new object[] { type };
 
                         _itemSetDefaultsIntMethod.Invoke(item, args);
 
@@ -177,7 +192,7 @@ namespace ItemSpawner
 
                         if (!string.IsNullOrEmpty(name) && name.Trim() != "")
                         {
-                            _allItems.Add(new ItemEntry { Id = i, Name = name, MaxStack = maxStack });
+                            _allItems.Add(new ItemEntry { Id = type, Name = name, MaxStack = maxStack });
                         }
                     }
                     catch
@@ -188,12 +203,36 @@ namespace ItemSpawner
 
                 _allItems = _allItems.OrderBy(i => i.Name).ToList();
                 _filteredItems = new List<ItemEntry>(_allItems);
-                _log.Info($"Item catalog built with {_allItems.Count} items");
+                _log.Info($"Item catalog built with {_allItems.Count} items ({errorCount} init errors)");
             }
             catch (Exception ex)
             {
                 _log.Error($"Failed to build item catalog: {ex.Message}");
             }
+        }
+
+        private int AddRegisteredCustomTypes(HashSet<int> candidateTypes)
+        {
+            if (candidateTypes == null) return 0;
+
+            int added = 0;
+            try
+            {
+                foreach (string fullId in ItemRegistry.AllIds)
+                {
+                    int runtimeType = ItemRegistry.GetRuntimeType(fullId);
+                    if (runtimeType > 0 && candidateTypes.Add(runtimeType))
+                    {
+                        added++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _log.Warn($"Failed to enumerate custom item runtime IDs: {ex.Message}");
+            }
+
+            return added;
         }
 
         #region UI
@@ -500,8 +539,7 @@ namespace ItemSpawner
 
         public void OnWorldLoad()
         {
-            if (_allItems.Count == 0)
-                BuildItemCatalog();
+            BuildItemCatalog();
         }
 
         public void OnWorldUnload()

@@ -63,6 +63,11 @@ namespace TerrariaModder.Core.Assets
 
         // Placement
         public int CreateTile { get; set; } = -1;
+        /// <summary>
+        /// Optional symbolic tile reference for placement, e.g. "modid:storage-unit".
+        /// If set, this overrides CreateTile during SetDefaults.
+        /// </summary>
+        public string CreateTileId { get; set; }
         public int CreateWall { get; set; } = -1;
         public int PlaceStyle { get; set; }
 

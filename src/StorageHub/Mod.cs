@@ -14,7 +14,7 @@ using StorageHub.UI;
 using StorageHub.Crafting;
 using StorageHub.Relay;
 using StorageHub.Debug;
-using StorageHub.PaintingChest;
+using StorageHub.DedicatedBlocks;
 
 namespace StorageHub
 {
@@ -51,7 +51,7 @@ namespace StorageHub
         private ILogger _log;
         private ModContext _context;
         private bool _enabled;
-        private bool _paintingChestEnabled;
+        private bool _dedicatedBlocksOnly;
 
         // Configuration
         private StorageHubConfig _hubConfig;
@@ -105,16 +105,14 @@ namespace StorageHub
             // Register keybind
             context.RegisterKeybind("toggle", "Toggle Storage Hub", "Open/close the Storage Hub UI", "F5", OnToggleUI);
 
+            // Register dedicated custom tiles/items (Storage Heart + Storage Unit)
+            DedicatedBlocksManager.Register(context, _log, OnStorageHeartRightClick);
+
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
             UIRenderer.RegisterPanelDraw("storage-hub", OnDraw);
 
-            // Initialize painting chest feature
-            _paintingChestEnabled = _context.Config.Get("paintingChest", true);
-            if (_paintingChestEnabled)
-            {
-                PaintingChestManager.Initialize(_log, _context);
-            }
+            _dedicatedBlocksOnly = _context.Config.Get("dedicatedBlocksOnly", true);
 
             _log.Info("StorageHub initialized - Press F5 to open");
         }
@@ -161,10 +159,6 @@ namespace StorageHub
 
         private void OnUpdate()
         {
-            // Painting chest deferred patching must tick even when UI disabled
-            if (_paintingChestEnabled)
-                PaintingChestManager.Update();
-
             if (!_enabled) return;
 
             // Check for chest opens
@@ -216,6 +210,7 @@ namespace StorageHub
                 // Initialize chest detector
                 _chestDetector = new ChestOpenDetector(_log, _registry);
                 _chestDetector.Initialize();
+                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, DedicatedBlocksManager.ResolveStorageUnitTileType());
 
                 // Initialize crafting system
                 _recipeIndex = new RecipeIndex(_log);
@@ -237,12 +232,6 @@ namespace StorageHub
 
                 // Initialize UI
                 _ui = new StorageHubUI(_log, _storageProvider, _hubConfig, _recipeIndex, _craftChecker, _recursiveCrafter, _rangeCalc, _context.Config);
-
-                // Initialize painting chest
-                if (_paintingChestEnabled)
-                {
-                    PaintingChestManager.OnWorldLoad(_hubConfig);
-                }
 
                 _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
 
@@ -341,12 +330,16 @@ namespace StorageHub
             _recursiveCrafter = null;
             _rangeCalc = null;
 
-            if (_paintingChestEnabled)
-            {
-                PaintingChestManager.Unload();
-            }
-
             _log.Info("StorageHub unloaded");
+        }
+
+        private bool OnStorageHeartRightClick()
+        {
+            if (!_enabled) return false;
+            if (_ui == null) return false;
+
+            _ui.Toggle();
+            return true;
         }
 
         private string GetWorldName()

@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <Reference Include="Terraria">
-      <HintPath>..\..\Terraria\Terraria.exe</HintPath>
+      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>
