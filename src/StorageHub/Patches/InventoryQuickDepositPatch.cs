@@ -100,6 +100,11 @@ namespace StorageHub.Patches
                 if (!InputState.IsShiftDown())
                     return true;
 
+                // Require an actual click edge so holding shift while hovering
+                // does not repeatedly transfer items.
+                if (!InputState.IsKeyJustPressed(KeyCode.MouseLeft))
+                    return true;
+
                 // Context 0 = main inventory/hotbar item slots.
                 if (context != 0)
                     return true;

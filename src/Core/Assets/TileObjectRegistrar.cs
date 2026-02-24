@@ -112,7 +112,7 @@ namespace TerrariaModder.Core.Assets
 
             // TileID.Sets flags
             SetTileSetBool("DisableSmartCursor", runtimeType, def.DisableSmartCursor);
-            SetTileSetBool("BasicChest", runtimeType, def.IsContainer);
+            SetTileSetBool("BasicChest", runtimeType, def.IsContainer && def.RegisterAsBasicChest);
         }
 
         private static void RegisterTileObjectData(int runtimeType, TileDefinition def)

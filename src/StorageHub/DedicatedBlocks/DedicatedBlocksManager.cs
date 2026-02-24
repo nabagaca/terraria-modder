@@ -138,6 +138,7 @@ namespace StorageHub.DedicatedBlocks
                 MapColorG = 120,
                 MapColorB = 140,
                 IsContainer = true,
+                RegisterAsBasicChest = false,
                 ContainerInteractable = false,
                 ContainerCapacity = 40,
                 ContainerName = "Storage Unit",

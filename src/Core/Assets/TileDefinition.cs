@@ -48,6 +48,7 @@ namespace TerrariaModder.Core.Assets
 
         // Container behavior hints
         public bool IsContainer { get; set; }
+        public bool RegisterAsBasicChest { get; set; } = true;
         public bool ContainerInteractable { get; set; } = true;
         public bool ContainerRequiresEmptyToBreak { get; set; } = true;
         public int ContainerCapacity { get; set; } = 40;

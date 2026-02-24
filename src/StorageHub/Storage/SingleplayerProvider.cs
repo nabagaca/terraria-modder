@@ -1022,7 +1022,7 @@ namespace StorageHub.Storage
             }
         }
 
-        public int QuickStackInventory(bool includeHotbar, bool includeFavorited = false)
+        public int QuickStackInventory(bool includeHotbar, bool includeFavorited = false, List<QuickStackTransfer> transfers = null)
         {
             try
             {
@@ -1085,6 +1085,7 @@ namespace StorageHub.Storage
                     }
 
                     totalDeposited += deposited;
+                    transfers?.Add(new QuickStackTransfer(snapshot.ItemId, deposited));
                 }
 
                 if (totalDeposited > 0)

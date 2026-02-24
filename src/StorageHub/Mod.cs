@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -105,6 +106,17 @@ namespace StorageHub
         private static PropertyInfo _playerNameProp;
         private static FieldInfo _vectorXField;
         private static FieldInfo _vectorYField;
+        private static MethodInfo _visualizeChestTransferMethod;
+        private static MethodInfo _soundPlayMethod;
+        private static FieldInfo _soundGrabField;
+        private static FieldInfo _contentSamplesItemsByTypeField;
+        private static PropertyInfo _contentSamplesItemsByTypeProperty;
+        private static Type _itemType;
+        private static MethodInfo _itemSetDefaultsMethod;
+        private static FieldInfo _itemStackField;
+        private bool _visualizeInitLogged;
+        private bool _visualizeFailureLogged;
+        private bool _visualizeUnavailableLogged;
 
         public void Initialize(ModContext context)
         {
@@ -187,6 +199,69 @@ namespace StorageHub
                     var vectorType = _playerPositionField.FieldType;
                     _vectorXField = vectorType?.GetField("X", BindingFlags.Public | BindingFlags.Instance);
                     _vectorYField = vectorType?.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
+                }
+
+                var terrariaAsm = _mainType?.Assembly ?? Assembly.Load("Terraria");
+                if (terrariaAsm != null)
+                {
+                    var chestType = terrariaAsm.GetType("Terraria.Chest");
+                    _itemType = terrariaAsm.GetType("Terraria.Item");
+                    var expectedVectorType = _playerPositionField?.FieldType;
+                    _visualizeChestTransferMethod = ResolveVisualizeTransferMethod(chestType, expectedVectorType, _itemType);
+
+                    var contentSamplesType = terrariaAsm.GetType("Terraria.ID.ContentSamples");
+                    _contentSamplesItemsByTypeField = contentSamplesType?.GetField("ItemsByType", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    _contentSamplesItemsByTypeProperty = contentSamplesType?.GetProperty("ItemsByType", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+
+                    if (_itemType != null)
+                    {
+                        _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
+
+                        foreach (var method in _itemType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                        {
+                            if (method.Name != "SetDefaults")
+                                continue;
+
+                            var p = method.GetParameters();
+                            if (p.Length >= 1 && p[0].ParameterType == typeof(int))
+                            {
+                                _itemSetDefaultsMethod = method;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (_visualizeChestTransferMethod != null && !_visualizeInitLogged)
+                    {
+                        _visualizeInitLogged = true;
+                        var p = _visualizeChestTransferMethod.GetParameters();
+                        _log.Info($"[QuickStack] Visual transfer method: {FormatMethodSignature(_visualizeChestTransferMethod)}");
+                    }
+                    else if (_visualizeChestTransferMethod == null && !_visualizeUnavailableLogged)
+                    {
+                        _visualizeUnavailableLogged = true;
+                        _log.Warn("[QuickStack] Visual transfer method not found");
+                    }
+
+                    var soundEngineType = terrariaAsm.GetType("Terraria.Audio.SoundEngine");
+                    if (soundEngineType != null)
+                    {
+                        foreach (var method in soundEngineType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+                        {
+                            if (method.Name != "PlaySound")
+                                continue;
+
+                            var p = method.GetParameters();
+                            if (p.Length == 6 && p[0].ParameterType == typeof(int))
+                            {
+                                _soundPlayMethod = method;
+                                break;
+                            }
+                        }
+                    }
+
+                    var soundIdType = terrariaAsm.GetType("Terraria.ID.SoundID");
+                    _soundGrabField = soundIdType?.GetField("Grab", BindingFlags.Public | BindingFlags.Static);
                 }
             }
             catch (Exception ex)
@@ -296,7 +371,10 @@ namespace StorageHub
                 InventoryQuickDepositPatch.SetCallbacks(
                     () => _ui != null && _ui.IsOpen,
                     TryQuickDepositInventorySlot);
-                VanillaQuickStackPatch.SetCallback(OnVanillaQuickStackAllChests);
+                VanillaQuickStackPatch.SetCallback(
+                    OnVanillaQuickStackAllChests,
+                    GetVanillaQuickStackSuppressedTileType,
+                    GetVanillaQuickStackSuppressedChestPositions);
 
                 _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
 
@@ -507,20 +585,34 @@ namespace StorageHub
                 return;
 
             int totalDeposited = 0;
+            bool playFeedbackSound = false;
 
             foreach (var network in networks)
             {
                 if (network.UnitCount <= 0)
                     continue;
 
+                var transfers = new List<QuickStackTransfer>();
                 using (_registry.UseTemporaryPositions(network.UnitPositions))
                 {
-                    totalDeposited += _storageProvider.QuickStackInventory(includeHotbar: false, includeFavorited: false);
+                    totalDeposited += _storageProvider.QuickStackInventory(
+                        includeHotbar: false,
+                        includeFavorited: false,
+                        transfers: transfers);
+                }
+
+                if (transfers.Count > 0)
+                {
+                    TryVisualizeQuickStackTransfers(player, network, transfers);
+                    playFeedbackSound = true;
                 }
             }
 
             if (totalDeposited > 0)
             {
+                if (playFeedbackSound)
+                    TryPlayQuickStackSound();
+
                 _ui?.MarkDirty();
                 _log.Info($"[QuickStack] Deposited {totalDeposited} item(s) into {networks.Count} nearby storage network(s)");
             }
@@ -588,6 +680,44 @@ namespace StorageHub
                    tileType == _storageCraftingAccessTileType;
         }
 
+        private int GetVanillaQuickStackSuppressedTileType()
+        {
+            if (!_enabled || !_dedicatedBlocksOnly)
+                return -1;
+
+            EnsureDedicatedTileTypesResolved();
+            return _storageUnitTileType;
+        }
+
+        private IEnumerable<(int x, int y)> GetVanillaQuickStackSuppressedChestPositions()
+        {
+            if (!_enabled || !_dedicatedBlocksOnly)
+                return Array.Empty<(int x, int y)>();
+
+            var positions = new HashSet<(int x, int y)>();
+
+            if (_registry != null)
+            {
+                foreach (var pos in _registry.GetRegisteredPositions())
+                    positions.Add(pos);
+            }
+
+            if (EnsureNetworkResolverReady(forceRecreate: false))
+            {
+                var player = GetLocalPlayer();
+                if (player != null && TryGetPlayerCenterTile(player, out int playerTileX, out int playerTileY))
+                {
+                    foreach (var network in FindNearbyQuickStackNetworks(playerTileX, playerTileY))
+                    {
+                        foreach (var unitPos in network.UnitPositions)
+                            positions.Add(unitPos);
+                    }
+                }
+            }
+
+            return positions;
+        }
+
         private void EnsureDedicatedTileTypesResolved()
         {
             _storageHeartTileType = DedicatedBlocksManager.ResolveStorageHeartTileType();
@@ -631,6 +761,485 @@ namespace StorageHub
             }
 
             return true;
+        }
+
+        private bool TryVisualizeQuickStackTransfers(object player, StorageNetworkResult network, IReadOnlyList<QuickStackTransfer> transfers)
+        {
+            if (transfers == null || transfers.Count == 0)
+                return false;
+
+            if (_visualizeChestTransferMethod == null)
+            {
+                if (!_visualizeUnavailableLogged)
+                {
+                    _visualizeUnavailableLogged = true;
+                    _log.Warn("[QuickStack] Visual transfer unavailable at runtime");
+                }
+                return false;
+            }
+
+            try
+            {
+                if (!TryGetPlayerCenterWorld(player, out float fromX, out float fromY))
+                    return false;
+
+                object from = CreateVector2(fromX, fromY);
+                // Use heart center so stacked units above/below are never treated as transfer target.
+                object to = CreateVector2(network.HeartX * 16f + 16f, network.HeartY * 16f + 16f);
+                if (from == null || to == null)
+                    return false;
+
+                object itemsByType = _contentSamplesItemsByTypeField?.GetValue(null)
+                    ?? _contentSamplesItemsByTypeProperty?.GetValue(null, null);
+
+                bool visualized = false;
+                int visualizedCount = 0;
+
+                foreach (var transfer in transfers)
+                {
+                    if (transfer.ItemId <= 0 || transfer.Stack <= 0)
+                        continue;
+
+                    // Prefer a concrete item instance, matching Magic Storage behavior.
+                    if (!TryCreateTransferItemSample(transfer.ItemId, out object itemSample) &&
+                        !TryGetContentSampleItem(itemsByType, transfer.ItemId, out itemSample))
+                    {
+                        continue;
+                    }
+
+                    if (itemSample != null && _itemStackField != null)
+                    {
+                        try { _itemStackField.SetValue(itemSample, Math.Max(1, transfer.Stack)); }
+                        catch { }
+                    }
+
+                    try
+                    {
+                        if (!TryInvokeVisualizeTransfer(from, to, itemSample, transfer.ItemId, transfer.Stack))
+                            continue;
+
+                        visualized = true;
+                        visualizedCount++;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!_visualizeFailureLogged)
+                        {
+                            _visualizeFailureLogged = true;
+                            _log.Warn($"[QuickStack] Visual transfer invocation failed: {ex.Message}");
+                        }
+                    }
+                }
+
+                if (!visualized)
+                    _log.Info($"[QuickStack] Visualization skipped (transfers={transfers.Count}, visuals={visualizedCount})");
+
+                return visualized;
+            }
+            catch (Exception ex)
+            {
+                if (!_visualizeFailureLogged)
+                {
+                    _visualizeFailureLogged = true;
+                    _log.Warn($"[QuickStack] Visual transfer failed: {ex.Message}");
+                }
+
+                return false;
+            }
+        }
+
+        private bool TryGetPlayerCenterWorld(object player, out float worldX, out float worldY)
+        {
+            worldX = 0f;
+            worldY = 0f;
+
+            try
+            {
+                if (player == null || _playerPositionField == null || _vectorXField == null || _vectorYField == null)
+                    return false;
+
+                var position = _playerPositionField.GetValue(player);
+                if (position == null)
+                    return false;
+
+                object xObj = _vectorXField.GetValue(position);
+                object yObj = _vectorYField.GetValue(position);
+                if (xObj == null || yObj == null)
+                    return false;
+
+                float x = Convert.ToSingle(xObj);
+                float y = Convert.ToSingle(yObj);
+                int width = GetSafeInt(_playerWidthField, player, 20);
+                int height = GetSafeInt(_playerHeightField, player, 40);
+
+                worldX = x + width * 0.5f;
+                worldY = y + height * 0.5f;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private object CreateVector2(float x, float y)
+        {
+            try
+            {
+                var vectorType = _playerPositionField?.FieldType;
+                if (vectorType == null)
+                    return null;
+
+                return Activator.CreateInstance(vectorType, new object[] { x, y });
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool TryGetContentSampleItem(object itemsByType, int itemType, out object item)
+        {
+            item = null;
+            if (itemsByType == null || itemType <= 0)
+                return false;
+
+            try
+            {
+                if (itemsByType is Array array)
+                {
+                    if (itemType >= 0 && itemType < array.Length)
+                    {
+                        item = array.GetValue(itemType);
+                        return item != null;
+                    }
+
+                    return false;
+                }
+
+                if (itemsByType is IDictionary dictionary)
+                {
+                    if (dictionary.Contains(itemType))
+                    {
+                        item = dictionary[itemType];
+                        return item != null;
+                    }
+
+                    return false;
+                }
+
+                var type = itemsByType.GetType();
+                var indexer = type.GetProperty("Item", new[] { typeof(int) });
+                if (indexer != null)
+                {
+                    item = indexer.GetValue(itemsByType, new object[] { itemType });
+                    if (item != null)
+                        return true;
+                }
+
+                foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (!string.Equals(method.Name, "TryGetValue", StringComparison.Ordinal))
+                        continue;
+
+                    var p = method.GetParameters();
+                    if (p.Length != 2 || p[0].ParameterType != typeof(int) || !p[1].ParameterType.IsByRef)
+                        continue;
+
+                    var args = new object[] { itemType, null };
+                    bool found = (bool)method.Invoke(itemsByType, args);
+                    if (found)
+                    {
+                        item = args[1];
+                        return item != null;
+                    }
+
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+
+            return false;
+        }
+
+        private bool TryCreateTransferItemSample(int itemType, out object item)
+        {
+            item = null;
+            if (itemType <= 0 || _itemType == null || _itemSetDefaultsMethod == null)
+                return false;
+
+            try
+            {
+                item = Activator.CreateInstance(_itemType);
+                if (item == null)
+                    return false;
+
+                int paramCount = _itemSetDefaultsMethod.GetParameters().Length;
+                if (paramCount <= 1)
+                    _itemSetDefaultsMethod.Invoke(item, new object[] { itemType });
+                else
+                    _itemSetDefaultsMethod.Invoke(item, new object[] { itemType, null });
+
+                return true;
+            }
+            catch
+            {
+                item = null;
+                return false;
+            }
+        }
+
+        private bool TryInvokeVisualizeTransfer(object from, object to, object itemSample, int itemType, int stack)
+        {
+            if (_visualizeChestTransferMethod == null || from == null || to == null || itemSample == null)
+                return false;
+
+            try
+            {
+                var parameters = _visualizeChestTransferMethod.GetParameters();
+                if (parameters.Length == 0)
+                    return false;
+
+                var args = new object[parameters.Length];
+                bool usedFrom = false;
+                bool usedTo = false;
+                bool usedItem = false;
+                bool usedItemType = false;
+                bool usedStack = false;
+
+                Type vectorType = _playerPositionField?.FieldType ?? from.GetType();
+                Type itemRuntimeType = itemSample.GetType();
+
+                for (int i = 0; i < parameters.Length; i++)
+                {
+                    var p = parameters[i];
+                    Type paramType = p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType;
+
+                    if (!usedFrom && vectorType != null && paramType == vectorType)
+                    {
+                        args[i] = from;
+                        usedFrom = true;
+                        continue;
+                    }
+
+                    if (!usedTo && vectorType != null && paramType == vectorType)
+                    {
+                        args[i] = to;
+                        usedTo = true;
+                        continue;
+                    }
+
+                    if (!usedItem && (paramType == itemRuntimeType || paramType.IsAssignableFrom(itemRuntimeType)))
+                    {
+                        args[i] = itemSample;
+                        usedItem = true;
+                        continue;
+                    }
+
+                    if (!usedItemType && (paramType == typeof(int) || paramType == typeof(short) || paramType == typeof(byte) || paramType == typeof(long)))
+                    {
+                        args[i] = Convert.ChangeType(Math.Max(1, itemType), paramType);
+                        usedItemType = true;
+                        usedItem = true; // Newer signatures use item type instead of Item instance.
+                        continue;
+                    }
+
+                    if (paramType != null && string.Equals(paramType.Name, "ItemTransferVisualizationSettings", StringComparison.Ordinal))
+                    {
+                        args[i] = CreateItemTransferVisualizationSettings(paramType, stack);
+                        continue;
+                    }
+
+                    if (!usedStack && !usedItemType &&
+                        (paramType == typeof(int) || paramType == typeof(short) || paramType == typeof(byte) || paramType == typeof(long)))
+                    {
+                        args[i] = Convert.ChangeType(Math.Max(1, stack), paramType);
+                        usedStack = true;
+                        continue;
+                    }
+
+                    args[i] = GetDefaultValue(paramType);
+                }
+
+                if (!usedFrom || !usedTo || !usedItem)
+                    return false;
+
+                _visualizeChestTransferMethod.Invoke(null, args);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private object CreateItemTransferVisualizationSettings(Type settingsType, int stack)
+        {
+            if (settingsType == null)
+                return null;
+
+            try
+            {
+                object settings = Activator.CreateInstance(settingsType);
+                if (settings == null)
+                    return null;
+
+                const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+                foreach (var field in settingsType.GetFields(flags))
+                {
+                    if (!IsLikelyStackMemberName(field.Name))
+                        continue;
+
+                    TryAssignIntegral(settings, field.FieldType, v => field.SetValue(settings, v), stack);
+                }
+
+                foreach (var prop in settingsType.GetProperties(flags))
+                {
+                    if (!prop.CanWrite || !IsLikelyStackMemberName(prop.Name))
+                        continue;
+
+                    TryAssignIntegral(settings, prop.PropertyType, v => prop.SetValue(settings, v, null), stack);
+                }
+
+                return settings;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool IsLikelyStackMemberName(string name)
+        {
+            if (string.IsNullOrEmpty(name))
+                return false;
+
+            string n = name.ToLowerInvariant();
+            return n.Contains("stack") || n.Contains("count") || n.Contains("amount");
+        }
+
+        private static void TryAssignIntegral(object target, Type memberType, Action<object> setter, int value)
+        {
+            if (target == null || memberType == null || setter == null)
+                return;
+
+            if (memberType != typeof(int) &&
+                memberType != typeof(short) &&
+                memberType != typeof(byte) &&
+                memberType != typeof(long) &&
+                memberType != typeof(uint) &&
+                memberType != typeof(ushort) &&
+                memberType != typeof(ulong))
+            {
+                return;
+            }
+
+            try
+            {
+                object converted = Convert.ChangeType(Math.Max(1, value), memberType);
+                setter(converted);
+            }
+            catch
+            {
+                // Best effort only.
+            }
+        }
+
+        private MethodInfo ResolveVisualizeTransferMethod(Type chestType, Type vectorType, Type itemType)
+        {
+            if (chestType == null)
+                return null;
+
+            MethodInfo best = null;
+            int bestScore = int.MinValue;
+
+            foreach (var method in chestType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+            {
+                if (!string.Equals(method.Name, "VisualizeChestTransfer", StringComparison.Ordinal))
+                    continue;
+
+                var parameters = method.GetParameters();
+                int score = 0;
+
+                if (parameters.Length >= 4)
+                    score += 3;
+
+                int vectorMatches = 0;
+                bool hasItem = false;
+                bool hasIntegral = false;
+                foreach (var p in parameters)
+                {
+                    var paramType = p.ParameterType.IsByRef ? p.ParameterType.GetElementType() : p.ParameterType;
+                    if (vectorType != null && paramType == vectorType)
+                        vectorMatches++;
+                    if (itemType != null && (paramType == itemType || paramType.IsAssignableFrom(itemType)))
+                        hasItem = true;
+                    if (paramType == typeof(int) || paramType == typeof(short) || paramType == typeof(byte) || paramType == typeof(long))
+                        hasIntegral = true;
+                }
+
+                score += vectorMatches >= 2 ? 4 : vectorMatches;
+                if (hasItem) score += 3;
+                if (hasIntegral) score += 2;
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = method;
+                }
+            }
+
+            return best;
+        }
+
+        private static object GetDefaultValue(Type type)
+        {
+            if (type == null)
+                return null;
+            if (!type.IsValueType)
+                return null;
+            if (type == typeof(bool))
+                return false;
+            try
+            {
+                return Activator.CreateInstance(type);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string FormatMethodSignature(MethodInfo method)
+        {
+            if (method == null)
+                return "<null>";
+
+            var parameters = method.GetParameters();
+            var parts = new string[parameters.Length];
+            for (int i = 0; i < parameters.Length; i++)
+                parts[i] = parameters[i].ParameterType.Name;
+
+            return $"{method.Name}({string.Join(", ", parts)})";
+        }
+
+        private void TryPlayQuickStackSound()
+        {
+            try
+            {
+                if (_soundPlayMethod == null)
+                    return;
+
+                int soundId = GetSafeStaticInt(_soundGrabField, 7);
+                _soundPlayMethod.Invoke(null, new object[] { soundId, -1, -1, 1, 1f, 0f });
+            }
+            catch
+            {
+                // Best effort feedback only.
+            }
         }
 
         private bool TryGetPlayerCenterTile(object player, out int tileX, out int tileY)
@@ -703,6 +1312,25 @@ namespace StorageHub
                 if (val == null)
                     return defaultValue;
                 return Convert.ToInt32(val);
+            }
+            catch
+            {
+                return defaultValue;
+            }
+        }
+
+        private int GetSafeStaticInt(FieldInfo field, int defaultValue)
+        {
+            if (field == null)
+                return defaultValue;
+
+            try
+            {
+                var value = field.GetValue(null);
+                if (value == null)
+                    return defaultValue;
+
+                return Convert.ToInt32(value);
             }
             catch
             {
