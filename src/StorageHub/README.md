@@ -2,6 +2,15 @@
 
 A unified storage management system for Terraria 1.4.5 that connects all your chests into one searchable interface with crafting, shimmering, and progression features.
 
+## Fork Context
+
+This Storage Hub version is part of a custom fork and includes behavior changes to more closely match Magic Storage-style workflows (heart/unit network usage, access points, and quick stack behavior).  
+This is an unofficial adaptation.
+
+## Attribution
+
+Design inspiration comes from [Magic Storage](https://github.com/blushiemagic/MagicStorage), created by `blushiemagic`.
+
 ## Features
 
 ### Unified Storage Access
