@@ -123,6 +123,14 @@ namespace StorageHub.Storage
         int DepositFromInventorySlot(int inventorySlot, bool singleItem);
 
         /// <summary>
+        /// Quick stack inventory items into storage.
+        /// </summary>
+        /// <param name="includeHotbar">If false, slots 0-9 are skipped.</param>
+        /// <param name="includeFavorited">If false, favorited inventory items are skipped.</param>
+        /// <returns>Total number of items deposited into existing item types in storage.</returns>
+        int QuickStackInventory(bool includeHotbar, bool includeFavorited = false);
+
+        /// <summary>
         /// Check if cursor is empty.
         /// </summary>
         bool IsCursorEmpty();

@@ -205,6 +205,13 @@ namespace TerrariaModder.Core.Assets
 
                 if (def.IsContainer)
                 {
+                    if (!def.ContainerInteractable)
+                    {
+                        // Consume the click so vanilla chest logic does not run.
+                        __instance.releaseUseTile = false;
+                        return false;
+                    }
+
                     if (CustomTileContainers.TryOpenContainer(__instance, myX, myY, def))
                     {
                         __instance.releaseUseTile = false;
@@ -458,27 +465,7 @@ namespace TerrariaModder.Core.Assets
 
         private static void InitializeContainerAt(int topX, int topY, TileDefinition def)
         {
-            if (def == null || !def.IsContainer)
-                return;
-
-            int chestIndex = Chest.FindChest(topX, topY);
-            if (chestIndex < 0)
-                chestIndex = Chest.CreateChest(topX, topY, -1);
-
-            if (chestIndex < 0)
-                return;
-
-            var chest = Main.chest[chestIndex];
-            if (chest == null)
-                return;
-
-            if (def.ContainerCapacity > 0 && chest.maxItems != def.ContainerCapacity)
-            {
-                var resize = chest.GetType().GetMethod("Resize", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
-                resize?.Invoke(chest, new object[] { def.ContainerCapacity });
-            }
-
-            chest.name = string.IsNullOrEmpty(def.ContainerName) ? def.DisplayName : def.ContainerName;
+            CustomTileContainers.EnsureContainerChest(topX, topY, def, out _);
         }
 
         private static void FinalizeCustomTilePlacement(TileDefinition def, int topX, int topY)
@@ -659,6 +646,36 @@ namespace TerrariaModder.Core.Assets
     /// </summary>
     public static class CustomTileContainers
     {
+        public static bool EnsureContainerChest(int topX, int topY, TileDefinition definition, out int chestIndex)
+        {
+            chestIndex = -1;
+
+            if (definition == null || !definition.IsContainer)
+                return false;
+
+            if (topX < 0 || topX >= Main.maxTilesX || topY < 0 || topY >= Main.maxTilesY)
+                return false;
+
+            chestIndex = Chest.FindChest(topX, topY);
+            if (chestIndex < 0)
+                chestIndex = Chest.CreateChest(topX, topY, -1);
+            if (chestIndex < 0)
+                return false;
+
+            var chest = Main.chest[chestIndex];
+            if (chest == null)
+                return false;
+
+            if (definition.ContainerCapacity > 0 && chest.maxItems != definition.ContainerCapacity)
+            {
+                var resize = chest.GetType().GetMethod("Resize", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
+                resize?.Invoke(chest, new object[] { definition.ContainerCapacity });
+            }
+
+            chest.name = string.IsNullOrEmpty(definition.ContainerName) ? definition.DisplayName : definition.ContainerName;
+            return true;
+        }
+
         public static bool IsCustomContainerTile(int tileType)
         {
             var def = TileRegistry.GetDefinition(tileType);
@@ -998,23 +1015,8 @@ namespace TerrariaModder.Core.Assets
             if (!TryGetTopLeft(tileX, tileY, definition, out int topX, out int topY))
                 return false;
 
-            int chestIndex = Chest.FindChest(topX, topY);
-            if (chestIndex < 0)
-                chestIndex = Chest.CreateChest(topX, topY, -1);
-            if (chestIndex < 0)
+            if (!EnsureContainerChest(topX, topY, definition, out int chestIndex))
                 return false;
-
-            var chest = Main.chest[chestIndex];
-            if (chest != null)
-            {
-                if (definition.ContainerCapacity > 0 && chest.maxItems != definition.ContainerCapacity)
-                {
-                    var resize = chest.GetType().GetMethod("Resize", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
-                    resize?.Invoke(chest, new object[] { definition.ContainerCapacity });
-                }
-
-                chest.name = string.IsNullOrEmpty(definition.ContainerName) ? definition.DisplayName : definition.ContainerName;
-            }
 
             Main.stackSplit = 600;
             int previousChest = player.chest;

@@ -49,6 +49,7 @@ namespace StorageHub.Storage
         private static FieldInfo _itemTypeField;
         private static FieldInfo _itemStackField;
         private static FieldInfo _itemPrefixField;
+        private static FieldInfo _itemFavoritedField;
         private static FieldInfo _itemMaxStackField;
         private static FieldInfo _itemRarityField;
         private static FieldInfo _itemDamageField;
@@ -142,6 +143,7 @@ namespace StorageHub.Storage
                     _itemTypeField = _itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
                     _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
                     _itemPrefixField = _itemType.GetField("prefix", BindingFlags.Public | BindingFlags.Instance);
+                    _itemFavoritedField = _itemType.GetField("favorited", BindingFlags.Public | BindingFlags.Instance);
                     _itemMaxStackField = _itemType.GetField("maxStack", BindingFlags.Public | BindingFlags.Instance);
                     _itemRarityField = _itemType.GetField("rare", BindingFlags.Public | BindingFlags.Instance);
                     // Category fields
@@ -1020,6 +1022,83 @@ namespace StorageHub.Storage
             }
         }
 
+        public int QuickStackInventory(bool includeHotbar, bool includeFavorited = false)
+        {
+            try
+            {
+                var player = GetLocalPlayer();
+                if (player == null) return 0;
+
+                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                if (inventory == null) return 0;
+
+                var chests = _chestArrayField?.GetValue(null) as Array;
+                if (chests == null) return 0;
+
+                // Match vanilla/Magic Storage semantics: quick stack only into item types
+                // that already exist in storage.
+                var existingTypes = GetExistingStorageItemTypes(chests, _registry.GetRegisteredPositions());
+                if (existingTypes.Count == 0) return 0;
+
+                int start = includeHotbar ? 0 : 10;
+                int end = Math.Min(inventory.Length, 50);
+                if (start >= end) return 0;
+
+                int totalDeposited = 0;
+
+                for (int i = start; i < end; i++)
+                {
+                    var slotItem = inventory.GetValue(i);
+                    if (slotItem == null) continue;
+
+                    var snapshot = CreateSnapshot(slotItem, SourceIndex.PlayerInventory, i);
+                    if (snapshot.IsEmpty) continue;
+
+                    if (!includeFavorited && GetSafeBool(_itemFavoritedField, slotItem))
+                        continue;
+
+                    if (!existingTypes.Contains(snapshot.ItemId))
+                        continue;
+
+                    var toDeposit = new ItemSnapshot(
+                        snapshot.ItemId,
+                        snapshot.Stack,
+                        snapshot.Prefix,
+                        snapshot.Name,
+                        snapshot.MaxStack,
+                        snapshot.Rarity,
+                        snapshot.SourceChestIndex,
+                        snapshot.SourceSlot);
+
+                    int deposited = DepositItem(toDeposit, out _);
+                    if (deposited <= 0) continue;
+
+                    int currentStack = GetSafeInt(_itemStackField, slotItem, 0);
+                    int newStack = currentStack - deposited;
+                    if (newStack <= 0)
+                    {
+                        ClearItem(slotItem);
+                    }
+                    else
+                    {
+                        _itemStackField?.SetValue(slotItem, newStack);
+                    }
+
+                    totalDeposited += deposited;
+                }
+
+                if (totalDeposited > 0)
+                    _log.Debug($"Quick-stacked {totalDeposited} item(s) from inventory");
+
+                return totalDeposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"QuickStackInventory failed: {ex.Message}");
+                return 0;
+            }
+        }
+
         public bool IsCursorEmpty()
         {
             try
@@ -1097,6 +1176,38 @@ namespace StorageHub.Storage
             {
                 // Best effort clear.
             }
+        }
+
+        private HashSet<int> GetExistingStorageItemTypes(Array chests, IEnumerable<(int x, int y)> positions)
+        {
+            var types = new HashSet<int>();
+            if (chests == null || positions == null)
+                return types;
+
+            foreach (var pos in positions)
+            {
+                int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                if (chestIndex < 0) continue;
+
+                var chest = chests.GetValue(chestIndex);
+                if (chest == null) continue;
+
+                var itemArray = _chestItemField?.GetValue(chest) as Array;
+                if (itemArray == null) continue;
+
+                for (int i = 0; i < itemArray.Length; i++)
+                {
+                    var chestItem = itemArray.GetValue(i);
+                    if (chestItem == null) continue;
+
+                    int type = GetSafeInt(_itemTypeField, chestItem, 0);
+                    int stack = GetSafeInt(_itemStackField, chestItem, 0);
+                    if (type > 0 && stack > 0)
+                        types.Add(type);
+                }
+            }
+
+            return types;
         }
 
         private object GetLocalPlayer()

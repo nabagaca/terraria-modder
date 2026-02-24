@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using TerrariaModder.Core;
+using TerrariaModder.Core.Assets;
 using TerrariaModder.Core.Config;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Logging;
@@ -80,12 +81,30 @@ namespace StorageHub
         private DebugDumper _debugDumper;
         public static DebugDumper Dumper { get; private set; }
 
+        private const int NearbyQuickStackScanRadiusTiles = 39;
+
+        // Dedicated tile runtime IDs
+        private int _storageHeartTileType = -1;
+        private int _storageUnitTileType = -1;
+        private int _storageComponentTileType = -1;
+        private int _storageConnectorTileType = -1;
+        private int _storageAccessTileType = -1;
+        private int _storageCraftingAccessTileType = -1;
+
         // Reflection for getting world/character names
         private static Type _mainType;
         private static FieldInfo _worldNameField;
+        private static FieldInfo _maxTilesXField;
+        private static FieldInfo _maxTilesYField;
         private static FieldInfo _playerArrayField;
         private static FieldInfo _myPlayerField;
+        private static FieldInfo _playerChestField;
+        private static FieldInfo _playerPositionField;
+        private static FieldInfo _playerWidthField;
+        private static FieldInfo _playerHeightField;
         private static PropertyInfo _playerNameProp;
+        private static FieldInfo _vectorXField;
+        private static FieldInfo _vectorYField;
 
         public void Initialize(ModContext context)
         {
@@ -117,6 +136,7 @@ namespace StorageHub
 
             // Shift-click quick-deposit from inventory while Storage Hub is open
             InventoryQuickDepositPatch.Initialize(_log);
+            VanillaQuickStackPatch.Initialize(_log);
 
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
@@ -144,6 +164,8 @@ namespace StorageHub
                 if (_mainType != null)
                 {
                     _worldNameField = _mainType.GetField("worldName", BindingFlags.Public | BindingFlags.Static);
+                    _maxTilesXField = _mainType.GetField("maxTilesX", BindingFlags.Public | BindingFlags.Static);
+                    _maxTilesYField = _mainType.GetField("maxTilesY", BindingFlags.Public | BindingFlags.Static);
                     _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
                     _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
                 }
@@ -153,7 +175,18 @@ namespace StorageHub
 
                 if (playerType != null)
                 {
+                    _playerChestField = playerType.GetField("chest", BindingFlags.Public | BindingFlags.Instance);
+                    _playerPositionField = playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
+                    _playerWidthField = playerType.GetField("width", BindingFlags.Public | BindingFlags.Instance);
+                    _playerHeightField = playerType.GetField("height", BindingFlags.Public | BindingFlags.Instance);
                     _playerNameProp = playerType.GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
+                }
+
+                if (_playerPositionField != null)
+                {
+                    var vectorType = _playerPositionField.FieldType;
+                    _vectorXField = vectorType?.GetField("X", BindingFlags.Public | BindingFlags.Instance);
+                    _vectorYField = vectorType?.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
                 }
             }
             catch (Exception ex)
@@ -228,23 +261,17 @@ namespace StorageHub
                 // Wire up save callback so registrations persist immediately (survives force quit)
                 _registry.OnRegistrationChanged = () => _hubConfig.Save();
 
+                EnsureDedicatedTileTypesResolved();
+
                 // Initialize storage provider
                 _storageProvider = new SingleplayerProvider(_log, _registry, _hubConfig);
 
                 // Initialize chest detector
                 _chestDetector = new ChestOpenDetector(_log, _registry);
                 _chestDetector.Initialize();
-                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, DedicatedBlocksManager.ResolveStorageUnitTileType());
+                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, _storageUnitTileType);
 
-                // Dedicated block network resolver (heart/component/connector graph)
-                _networkResolver = new StorageNetworkResolver(
-                    _log,
-                    DedicatedBlocksManager.ResolveStorageHeartTileType(),
-                    DedicatedBlocksManager.ResolveStorageUnitTileType(),
-                    DedicatedBlocksManager.ResolveStorageComponentTileType(),
-                    DedicatedBlocksManager.ResolveStorageConnectorTileType(),
-                    DedicatedBlocksManager.ResolveStorageAccessTileType(),
-                    DedicatedBlocksManager.ResolveStorageCraftingAccessTileType());
+                EnsureNetworkResolverReady(forceRecreate: true);
 
                 // Initialize crafting system
                 _recipeIndex = new RecipeIndex(_log);
@@ -269,6 +296,7 @@ namespace StorageHub
                 InventoryQuickDepositPatch.SetCallbacks(
                     () => _ui != null && _ui.IsOpen,
                     TryQuickDepositInventorySlot);
+                VanillaQuickStackPatch.SetCallback(OnVanillaQuickStackAllChests);
 
                 _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
 
@@ -327,6 +355,7 @@ namespace StorageHub
                 // Write debug session summary
                 _debugDumper?.WriteSessionSummary();
                 InventoryQuickDepositPatch.ClearCallbacks();
+                VanillaQuickStackPatch.ClearCallback();
 
                 // Clear singleton and null out references to prevent stale polling between worlds
                 ChestRegistry.ClearInstance();
@@ -343,6 +372,12 @@ namespace StorageHub
                 _debugDumper = null;
                 Dumper = null;
                 _networkResolver = null;
+                _storageHeartTileType = -1;
+                _storageUnitTileType = -1;
+                _storageComponentTileType = -1;
+                _storageConnectorTileType = -1;
+                _storageAccessTileType = -1;
+                _storageCraftingAccessTileType = -1;
             }
             catch (Exception ex)
             {
@@ -359,6 +394,7 @@ namespace StorageHub
             _ui?.Close();
             _ui = null;
             InventoryQuickDepositPatch.Unload();
+            VanillaQuickStackPatch.Unload();
 
             _hubConfig = null;
             _registry = null;
@@ -441,6 +477,237 @@ namespace StorageHub
             }
 
             return false;
+        }
+
+        private void OnVanillaQuickStackAllChests()
+        {
+            if (!_enabled || !_dedicatedBlocksOnly)
+                return;
+
+            if (_storageProvider == null || _registry == null)
+                return;
+
+            if (!EnsureNetworkResolverReady(forceRecreate: false))
+                return;
+
+            var player = GetLocalPlayer();
+            if (player == null)
+                return;
+
+            // Keep vanilla container quick-stack behavior untouched while any container is open.
+            if (GetSafeInt(_playerChestField, player, -1) != -1)
+                return;
+
+            if (!TryGetPlayerCenterTile(player, out int playerTileX, out int playerTileY))
+                return;
+
+            var networks = FindNearbyQuickStackNetworks(playerTileX, playerTileY);
+            _log.Debug($"[QuickStack] Callback fired at ({playerTileX}, {playerTileY}), nearby networks={networks.Count}");
+            if (networks.Count == 0)
+                return;
+
+            int totalDeposited = 0;
+
+            foreach (var network in networks)
+            {
+                if (network.UnitCount <= 0)
+                    continue;
+
+                using (_registry.UseTemporaryPositions(network.UnitPositions))
+                {
+                    totalDeposited += _storageProvider.QuickStackInventory(includeHotbar: false, includeFavorited: false);
+                }
+            }
+
+            if (totalDeposited > 0)
+            {
+                _ui?.MarkDirty();
+                _log.Info($"[QuickStack] Deposited {totalDeposited} item(s) into {networks.Count} nearby storage network(s)");
+            }
+        }
+
+        private List<StorageNetworkResult> FindNearbyQuickStackNetworks(int playerTileX, int playerTileY)
+        {
+            var networks = new List<StorageNetworkResult>();
+
+            if (_networkResolver == null)
+                return networks;
+
+            if (!TryGetWorldTileBounds(out int maxTilesX, out int maxTilesY))
+                return networks;
+
+            int startX = Math.Max(0, playerTileX - NearbyQuickStackScanRadiusTiles);
+            int startY = Math.Max(0, playerTileY - NearbyQuickStackScanRadiusTiles);
+            int endX = Math.Min(maxTilesX - 1, playerTileX + NearbyQuickStackScanRadiusTiles);
+            int endY = Math.Min(maxTilesY - 1, playerTileY + NearbyQuickStackScanRadiusTiles);
+
+            var scannedAccesses = new HashSet<(int x, int y)>();
+            var seenHearts = new HashSet<(int x, int y)>();
+
+            for (int x = startX; x <= endX; x++)
+            {
+                for (int y = startY; y <= endY; y++)
+                {
+                    if (!CustomTileContainers.TryGetTileDefinition(x, y, out var def, out int tileType))
+                        continue;
+
+                    if (!IsQuickStackAccessTileType(tileType))
+                        continue;
+
+                    int topX = x;
+                    int topY = y;
+                    if (def != null && CustomTileContainers.TryGetTopLeft(x, y, def, out int resolvedTopX, out int resolvedTopY))
+                    {
+                        topX = resolvedTopX;
+                        topY = resolvedTopY;
+                    }
+
+                    if (!scannedAccesses.Add((topX, topY)))
+                        continue;
+
+                    if (!_networkResolver.TryResolveNetwork(topX, topY, out var network))
+                        continue;
+
+                    if (!network.HasHeart || network.UnitCount <= 0)
+                        continue;
+
+                    if (!seenHearts.Add((network.HeartX, network.HeartY)))
+                        continue;
+
+                    networks.Add(network);
+                }
+            }
+
+            return networks;
+        }
+
+        private bool IsQuickStackAccessTileType(int tileType)
+        {
+            return tileType == _storageHeartTileType ||
+                   tileType == _storageAccessTileType ||
+                   tileType == _storageCraftingAccessTileType;
+        }
+
+        private void EnsureDedicatedTileTypesResolved()
+        {
+            _storageHeartTileType = DedicatedBlocksManager.ResolveStorageHeartTileType();
+            _storageUnitTileType = DedicatedBlocksManager.ResolveStorageUnitTileType();
+            _storageComponentTileType = DedicatedBlocksManager.ResolveStorageComponentTileType();
+            _storageConnectorTileType = DedicatedBlocksManager.ResolveStorageConnectorTileType();
+            _storageAccessTileType = DedicatedBlocksManager.ResolveStorageAccessTileType();
+            _storageCraftingAccessTileType = DedicatedBlocksManager.ResolveStorageCraftingAccessTileType();
+        }
+
+        private bool EnsureNetworkResolverReady(bool forceRecreate)
+        {
+            EnsureDedicatedTileTypesResolved();
+
+            bool validTypes = _storageHeartTileType >= 0 &&
+                              _storageUnitTileType >= 0 &&
+                              _storageComponentTileType >= 0 &&
+                              _storageConnectorTileType >= 0 &&
+                              _storageAccessTileType >= 0 &&
+                              _storageCraftingAccessTileType >= 0;
+
+            if (!validTypes)
+            {
+                _log.Warn($"[QuickStack] Dedicated tile type resolution failed: heart={_storageHeartTileType}, unit={_storageUnitTileType}, component={_storageComponentTileType}, connector={_storageConnectorTileType}, access={_storageAccessTileType}, crafting={_storageCraftingAccessTileType}");
+                return false;
+            }
+
+            if (_chestDetector != null)
+                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, _storageUnitTileType);
+
+            if (forceRecreate || _networkResolver == null)
+            {
+                _networkResolver = new StorageNetworkResolver(
+                    _log,
+                    _storageHeartTileType,
+                    _storageUnitTileType,
+                    _storageComponentTileType,
+                    _storageConnectorTileType,
+                    _storageAccessTileType,
+                    _storageCraftingAccessTileType);
+            }
+
+            return true;
+        }
+
+        private bool TryGetPlayerCenterTile(object player, out int tileX, out int tileY)
+        {
+            tileX = 0;
+            tileY = 0;
+
+            try
+            {
+                if (player == null || _playerPositionField == null || _vectorXField == null || _vectorYField == null)
+                    return false;
+
+                var position = _playerPositionField.GetValue(player);
+                if (position == null)
+                    return false;
+
+                object xObj = _vectorXField.GetValue(position);
+                object yObj = _vectorYField.GetValue(position);
+                if (xObj == null || yObj == null)
+                    return false;
+
+                float x = Convert.ToSingle(xObj);
+                float y = Convert.ToSingle(yObj);
+                int width = GetSafeInt(_playerWidthField, player, 20);
+                int height = GetSafeInt(_playerHeightField, player, 40);
+
+                float centerX = x + width * 0.5f;
+                float centerY = y + height * 0.5f;
+
+                tileX = (int)(centerX / 16f);
+                tileY = (int)(centerY / 16f);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryGetWorldTileBounds(out int maxTilesX, out int maxTilesY)
+        {
+            maxTilesX = 0;
+            maxTilesY = 0;
+
+            try
+            {
+                object xObj = _maxTilesXField?.GetValue(null);
+                object yObj = _maxTilesYField?.GetValue(null);
+                if (xObj == null || yObj == null)
+                    return false;
+
+                maxTilesX = Convert.ToInt32(xObj);
+                maxTilesY = Convert.ToInt32(yObj);
+                return maxTilesX > 0 && maxTilesY > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private int GetSafeInt(FieldInfo field, object obj, int defaultValue)
+        {
+            if (field == null || obj == null)
+                return defaultValue;
+
+            try
+            {
+                var val = field.GetValue(obj);
+                if (val == null)
+                    return defaultValue;
+                return Convert.ToInt32(val);
+            }
+            catch
+            {
+                return defaultValue;
+            }
         }
 
         private string GetWorldName()
