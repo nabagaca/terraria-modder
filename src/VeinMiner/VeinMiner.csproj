@@ -8,6 +8,11 @@
     <OutputPath>..\..\build\plugins\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <TerrariaInstallDir Condition="'$(TerrariaInstallDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Terraria</TerrariaInstallDir>
+    <TerrariaAssemblyPath Condition="Exists('..\..\Terraria\Terraria.exe')">..\..\Terraria\Terraria.exe</TerrariaAssemblyPath>
+    <TerrariaAssemblyPath Condition="'$(TerrariaAssemblyPath)' == ''">$(TerrariaInstallDir)\Terraria.exe</TerrariaAssemblyPath>
+    <HarmonyAssemblyPath Condition="Exists('..\..\Terraria\Mods\Libs\0Harmony.dll')">..\..\Terraria\Mods\Libs\0Harmony.dll</HarmonyAssemblyPath>
+    <HarmonyAssemblyPath Condition="'$(HarmonyAssemblyPath)' == ''">$(TerrariaInstallDir)\TerrariaModder\core\deps\0Harmony.dll</HarmonyAssemblyPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,14 +23,14 @@
 
   <ItemGroup>
     <Reference Include="Terraria">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Terraria\Terraria.exe</HintPath>
+      <HintPath>$(TerrariaAssemblyPath)</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="0Harmony">
-      <HintPath>C:\Program Files (x86)\Steam\steamapps\common\Terraria\TerrariaModder\core\deps\0Harmony.dll</HintPath>
+      <HintPath>$(HarmonyAssemblyPath)</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

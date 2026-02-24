@@ -1,0 +1,23 @@
+<Project>
+  <PropertyGroup>
+    <!-- Set to false to disable automatic deployment during build -->
+    <TerrariaModderAutoDeploy Condition="'$(TerrariaModderAutoDeploy)' == ''">true</TerrariaModderAutoDeploy>
+
+    <!-- Override these if Terraria is installed elsewhere -->
+    <TerrariaInstallDir Condition="'$(TerrariaInstallDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Terraria</TerrariaInstallDir>
+    <TerrariaModderDeployRoot Condition="'$(TerrariaModderDeployRoot)' == ''">$(TerrariaInstallDir)\TerrariaModder</TerrariaModderDeployRoot>
+  </PropertyGroup>
+
+  <Target Name="DeployToTerrariaModder"
+          AfterTargets="Build"
+          Condition="'$(TerrariaModderAutoDeploy)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_DeployScript>$(MSBuildThisFileDirectory)scripts\deploy-build-output.ps1</_DeployScript>
+      <_IsCoreSwitch></_IsCoreSwitch>
+      <_IsCoreSwitch Condition="'$(MSBuildProjectName)' == 'TerrariaModder.Core'">-IsCore</_IsCoreSwitch>
+    </PropertyGroup>
+
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(_DeployScript)&quot; -ProjectDir &quot;$(MSBuildProjectDirectory)&quot; -ProjectName &quot;$(MSBuildProjectName)&quot; -TargetPath &quot;$(TargetPath)&quot; -TargetFileName &quot;$(TargetFileName)&quot; -TerrariaModderRoot &quot;$(TerrariaModderDeployRoot)&quot; $(_IsCoreSwitch)"
+          ContinueOnError="WarnAndContinue" />
+  </Target>
+</Project>
