@@ -150,6 +150,29 @@ namespace StorageHub.Storage
         public int Count => _registeredPositions.Count;
 
         /// <summary>
+        /// Replace all registrations with a new set of positions.
+        /// Used by dedicated Storage Hub networks to mirror currently connected units.
+        /// </summary>
+        public bool ReplaceAll(IEnumerable<(int x, int y)> positions)
+        {
+            var next = new HashSet<(int x, int y)>();
+            if (positions != null)
+            {
+                foreach (var pos in positions)
+                    next.Add(pos);
+            }
+
+            if (_registeredPositions.SetEquals(next))
+                return false;
+
+            _registeredPositions = next;
+            _log.Debug($"[Registry] Replaced registrations, total: {_registeredPositions.Count}");
+            SaveToConfig();
+            OnRegistrationChanged?.Invoke();
+            return true;
+        }
+
+        /// <summary>
         /// Clear all registrations.
         /// Used when resetting or changing worlds.
         /// </summary>

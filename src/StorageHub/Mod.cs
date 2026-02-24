@@ -15,6 +15,7 @@ using StorageHub.Crafting;
 using StorageHub.Relay;
 using StorageHub.Debug;
 using StorageHub.DedicatedBlocks;
+using StorageHub.Utils;
 
 namespace StorageHub
 {
@@ -61,6 +62,7 @@ namespace StorageHub
         private ChestRegistry _registry;
         private IStorageProvider _storageProvider;
         private ChestOpenDetector _chestDetector;
+        private StorageNetworkResolver _networkResolver;
 
         // Crafting system
         private RecipeIndex _recipeIndex;
@@ -106,7 +108,15 @@ namespace StorageHub
             context.RegisterKeybind("toggle", "Toggle Storage Hub", "Open/close the Storage Hub UI", "F5", OnToggleUI);
 
             // Register dedicated custom tiles/items (Storage Heart + Storage Unit)
-            DedicatedBlocksManager.Register(context, _log, OnStorageHeartRightClick);
+            DedicatedBlocksManager.Register(
+                context,
+                _log,
+                OnStorageHeartRightClick,
+                OnStorageAccessRightClick,
+                OnStorageCraftingAccessRightClick);
+
+            // Shift-click quick-deposit from inventory while Storage Hub is open
+            InventoryQuickDepositPatch.Initialize(_log);
 
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
@@ -114,7 +124,9 @@ namespace StorageHub
 
             _dedicatedBlocksOnly = _context.Config.Get("dedicatedBlocksOnly", true);
 
-            _log.Info("StorageHub initialized - Press F5 to open");
+            _log.Info(_dedicatedBlocksOnly
+                ? "StorageHub initialized - use Storage Heart/Access to open"
+                : "StorageHub initialized - Press F5 to open");
         }
 
         private void LoadConfig()
@@ -153,6 +165,18 @@ namespace StorageHub
         private void OnToggleUI()
         {
             if (_ui == null) return;
+
+            if (_ui.IsOpen)
+            {
+                _ui.Toggle();
+                return;
+            }
+
+            if (_dedicatedBlocksOnly)
+            {
+                GameText.Show("Use a Storage Heart or Storage Access to open Storage Hub.");
+                return;
+            }
 
             _ui.Toggle();
         }
@@ -212,6 +236,16 @@ namespace StorageHub
                 _chestDetector.Initialize();
                 _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, DedicatedBlocksManager.ResolveStorageUnitTileType());
 
+                // Dedicated block network resolver (heart/component/connector graph)
+                _networkResolver = new StorageNetworkResolver(
+                    _log,
+                    DedicatedBlocksManager.ResolveStorageHeartTileType(),
+                    DedicatedBlocksManager.ResolveStorageUnitTileType(),
+                    DedicatedBlocksManager.ResolveStorageComponentTileType(),
+                    DedicatedBlocksManager.ResolveStorageConnectorTileType(),
+                    DedicatedBlocksManager.ResolveStorageAccessTileType(),
+                    DedicatedBlocksManager.ResolveStorageCraftingAccessTileType());
+
                 // Initialize crafting system
                 _recipeIndex = new RecipeIndex(_log);
                 if (_recipeIndex.InitReflection())
@@ -232,6 +266,9 @@ namespace StorageHub
 
                 // Initialize UI
                 _ui = new StorageHubUI(_log, _storageProvider, _hubConfig, _recipeIndex, _craftChecker, _recursiveCrafter, _rangeCalc, _context.Config);
+                InventoryQuickDepositPatch.SetCallbacks(
+                    () => _ui != null && _ui.IsOpen,
+                    TryQuickDepositInventorySlot);
 
                 _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
 
@@ -289,6 +326,7 @@ namespace StorageHub
 
                 // Write debug session summary
                 _debugDumper?.WriteSessionSummary();
+                InventoryQuickDepositPatch.ClearCallbacks();
 
                 // Clear singleton and null out references to prevent stale polling between worlds
                 ChestRegistry.ClearInstance();
@@ -304,6 +342,7 @@ namespace StorageHub
                 _rangeCalc = null;
                 _debugDumper = null;
                 Dumper = null;
+                _networkResolver = null;
             }
             catch (Exception ex)
             {
@@ -319,6 +358,7 @@ namespace StorageHub
             // Clean up UI
             _ui?.Close();
             _ui = null;
+            InventoryQuickDepositPatch.Unload();
 
             _hubConfig = null;
             _registry = null;
@@ -329,17 +369,78 @@ namespace StorageHub
             _craftExecutor = null;
             _recursiveCrafter = null;
             _rangeCalc = null;
+            _networkResolver = null;
 
             _log.Info("StorageHub unloaded");
         }
 
-        private bool OnStorageHeartRightClick()
+        private bool OnStorageHeartRightClick(int tileX, int tileY)
+        {
+            return OpenDedicatedNetwork(tileX, tileY, preferCraftingTab: false);
+        }
+
+        private bool OnStorageAccessRightClick(int tileX, int tileY)
+        {
+            return OpenDedicatedNetwork(tileX, tileY, preferCraftingTab: false);
+        }
+
+        private bool OnStorageCraftingAccessRightClick(int tileX, int tileY)
+        {
+            return OpenDedicatedNetwork(tileX, tileY, preferCraftingTab: true);
+        }
+
+        private bool OpenDedicatedNetwork(int tileX, int tileY, bool preferCraftingTab)
         {
             if (!_enabled) return false;
-            if (_ui == null) return false;
+            if (_ui == null || _registry == null) return false;
 
-            _ui.Toggle();
+            if (!_dedicatedBlocksOnly)
+            {
+                if (preferCraftingTab) _ui.OpenCrafting();
+                else _ui.OpenItems();
+                return true;
+            }
+
+            if (_networkResolver == null)
+            {
+                GameText.Show("Storage network resolver is not available.");
+                return false;
+            }
+
+            if (!_networkResolver.TryResolveNetwork(tileX, tileY, out var network) || !network.HasHeart)
+            {
+                GameText.Show("This access point is not connected to a Storage Heart.");
+                return false;
+            }
+
+            if (network.UnitCount <= 0)
+            {
+                GameText.Show("A Storage Heart needs at least one connected Storage Unit.");
+                return false;
+            }
+
+            _registry.ReplaceAll(network.UnitPositions);
+
+            if (preferCraftingTab) _ui.OpenCrafting();
+            else _ui.OpenItems();
+
+            _log.Debug($"Opened Storage Hub from network heart ({network.HeartX}, {network.HeartY}) with {network.UnitCount} unit(s)");
             return true;
+        }
+
+        private bool TryQuickDepositInventorySlot(int inventorySlot)
+        {
+            if (!_enabled || _storageProvider == null || _ui == null || !_ui.IsOpen)
+                return false;
+
+            int deposited = _storageProvider.DepositFromInventorySlot(inventorySlot, singleItem: false);
+            if (deposited > 0)
+            {
+                _ui.MarkDirty();
+                return true;
+            }
+
+            return false;
         }
 
         private string GetWorldName()

@@ -916,6 +916,110 @@ namespace StorageHub.Storage
             }
         }
 
+        public int DepositFromCursor(bool singleItem)
+        {
+            try
+            {
+                if (_mouseItemField == null) return 0;
+
+                var mouseItem = _mouseItemField.GetValue(null);
+                if (mouseItem == null) return 0;
+
+                var snapshot = CreateSnapshot(mouseItem, SourceIndex.PlayerInventory, 0);
+                if (snapshot.IsEmpty) return 0;
+
+                int requested = singleItem ? 1 : snapshot.Stack;
+                if (requested <= 0) return 0;
+
+                var toDeposit = new ItemSnapshot(
+                    snapshot.ItemId,
+                    requested,
+                    snapshot.Prefix,
+                    snapshot.Name,
+                    snapshot.MaxStack,
+                    snapshot.Rarity,
+                    snapshot.SourceChestIndex,
+                    snapshot.SourceSlot);
+
+                int deposited = DepositItem(toDeposit, out _);
+                if (deposited <= 0) return 0;
+
+                int currentStack = GetSafeInt(_itemStackField, mouseItem, 0);
+                int newStack = currentStack - deposited;
+                if (newStack <= 0)
+                {
+                    ClearItem(mouseItem);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(mouseItem, newStack);
+                }
+
+                _log.Debug($"Deposited {deposited}x {snapshot.Name} from cursor");
+                return deposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DepositFromCursor failed: {ex.Message}");
+                return 0;
+            }
+        }
+
+        public int DepositFromInventorySlot(int inventorySlot, bool singleItem)
+        {
+            try
+            {
+                if (inventorySlot < 0 || inventorySlot >= 50) return 0;
+
+                var player = GetLocalPlayer();
+                if (player == null) return 0;
+
+                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                if (inventory == null || inventorySlot >= inventory.Length) return 0;
+
+                var slotItem = inventory.GetValue(inventorySlot);
+                if (slotItem == null) return 0;
+
+                var snapshot = CreateSnapshot(slotItem, SourceIndex.PlayerInventory, inventorySlot);
+                if (snapshot.IsEmpty) return 0;
+
+                int requested = singleItem ? 1 : snapshot.Stack;
+                if (requested <= 0) return 0;
+
+                var toDeposit = new ItemSnapshot(
+                    snapshot.ItemId,
+                    requested,
+                    snapshot.Prefix,
+                    snapshot.Name,
+                    snapshot.MaxStack,
+                    snapshot.Rarity,
+                    snapshot.SourceChestIndex,
+                    snapshot.SourceSlot);
+
+                int deposited = DepositItem(toDeposit, out _);
+                if (deposited <= 0) return 0;
+
+                int currentStack = GetSafeInt(_itemStackField, slotItem, 0);
+                int newStack = currentStack - deposited;
+                if (newStack <= 0)
+                {
+                    ClearItem(slotItem);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(slotItem, newStack);
+                }
+
+                _log.Debug($"Deposited {deposited}x {snapshot.Name} from inventory slot {inventorySlot}");
+                return deposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DepositFromInventorySlot failed: {ex.Message}");
+                return 0;
+            }
+        }
+
         public bool IsCursorEmpty()
         {
             try
@@ -963,6 +1067,36 @@ namespace StorageHub.Storage
         {
             if (prefix <= 0 || _itemPrefixMethod == null) return;
             _itemPrefixMethod.Invoke(item, new object[] { prefix });
+        }
+
+        private void ClearItem(object item)
+        {
+            if (item == null) return;
+
+            try
+            {
+                if (!InvokeSetDefaults(item, 0))
+                {
+                    _itemTypeField?.SetValue(item, 0);
+                    _itemStackField?.SetValue(item, 0);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(item, 0);
+                }
+
+                if (_itemPrefixField != null)
+                {
+                    if (_itemPrefixField.FieldType == typeof(byte))
+                        _itemPrefixField.SetValue(item, (byte)0);
+                    else
+                        _itemPrefixField.SetValue(item, 0);
+                }
+            }
+            catch
+            {
+                // Best effort clear.
+            }
         }
 
         private object GetLocalPlayer()

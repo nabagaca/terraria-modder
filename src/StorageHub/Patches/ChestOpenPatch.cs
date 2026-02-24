@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using TerrariaModder.Core.Logging;
 using StorageHub.Storage;
+using StorageHub.Utils;
 
 namespace StorageHub.Patches
 {
@@ -31,6 +32,7 @@ namespace StorageHub.Patches
         private static FieldInfo _myPlayerField;
         private static FieldInfo _chestArrayField;
         private static FieldInfo _tileArrayField;
+        private static FieldInfo _playerInventoryField;
         private static FieldInfo _playerChestField;
         private static FieldInfo _chestXField;
         private static FieldInfo _chestYField;
@@ -64,6 +66,7 @@ namespace StorageHub.Patches
                     _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
                     _chestArrayField = _mainType.GetField("chest", BindingFlags.Public | BindingFlags.Static);
                     _tileArrayField = _mainType.GetField("tile", BindingFlags.Public | BindingFlags.Static);
+                    _playerInventoryField = _mainType.GetField("playerInventory", BindingFlags.Public | BindingFlags.Static);
                 }
 
                 var playerType = Type.GetType("Terraria.Player, Terraria")
@@ -197,14 +200,19 @@ namespace StorageHub.Patches
                 // Terraria prevents opening locked chests anyway
 
                 // Register the chest
-                if (_dedicatedBlocksOnly && _requiredTileType >= 0)
+                if (_dedicatedBlocksOnly)
                 {
                     int tileType = GetTileTypeAt(x, y);
-                    if (tileType != _requiredTileType)
+                    if (_requiredTileType >= 0 && tileType == _requiredTileType)
                     {
-                        _log.Debug($"Skipped chest at ({x}, {y}) - tile type {tileType}, requires {_requiredTileType}");
-                        return;
+                        CloseCurrentChest();
+                        GameText.Show("Storage Units cannot be opened directly. Use Storage Heart or Storage Access.");
+                        _log.Debug($"Blocked direct Storage Unit open at ({x}, {y})");
                     }
+
+                    // Dedicated block mode uses network scans from heart/access interactions,
+                    // not manual chest registration.
+                    return;
                 }
 
                 if (_registry.RegisterChest(x, y))
@@ -261,6 +269,34 @@ namespace StorageHub.Patches
             catch
             {
                 return -1;
+            }
+        }
+
+        private void CloseCurrentChest()
+        {
+            try
+            {
+                if (_myPlayerField == null || _playerArrayField == null || _playerChestField == null)
+                    return;
+
+                var myPlayerVal = _myPlayerField.GetValue(null);
+                if (myPlayerVal == null) return;
+
+                int myPlayer = (int)myPlayerVal;
+                var players = _playerArrayField.GetValue(null) as Array;
+                if (players == null || myPlayer < 0 || myPlayer >= players.Length)
+                    return;
+
+                var player = players.GetValue(myPlayer);
+                if (player == null) return;
+
+                _playerChestField.SetValue(player, -1);
+                _playerInventoryField?.SetValue(null, false);
+                _lastChestIndex = -1;
+            }
+            catch
+            {
+                // Best effort close.
             }
         }
     }

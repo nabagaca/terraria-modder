@@ -162,6 +162,39 @@ namespace StorageHub.UI
         }
 
         /// <summary>
+        /// Open storage UI on the Items tab.
+        /// If already open, switches tab and refreshes.
+        /// </summary>
+        public void OpenItems()
+        {
+            OpenAtTab(TabItems);
+        }
+
+        /// <summary>
+        /// Open storage UI on the Crafting tab.
+        /// If already open, switches tab and refreshes.
+        /// </summary>
+        public void OpenCrafting()
+        {
+            OpenAtTab(TabCraft);
+        }
+
+        private void OpenAtTab(int tab)
+        {
+            _activeTab = Math.Max(0, Math.Min(TabNames.Length - 1, tab));
+
+            if (!_isOpen)
+            {
+                Toggle();
+                return;
+            }
+
+            _needsRefresh = true;
+            _framesSinceRefresh = 0;
+            MarkDirty();
+        }
+
+        /// <summary>
         /// Close the UI via Escape key. Also closes inventory.
         /// </summary>
         public void CloseWithEscape()
@@ -518,6 +551,8 @@ namespace StorageHub.UI
 
             _scrollView.End();
 
+            HandleCursorDepositInput(x, gridY, width, gridHeight, pingMode: _pingMode);
+
             // Help text at bottom - changes based on ping mode
             if (_pingMode)
             {
@@ -525,7 +560,7 @@ namespace StorageHub.UI
             }
             else
             {
-                UIRenderer.DrawText("L=Take  R=+1  Shift=Inv  Mid=Fav  (#weapon #potion -#fav)", x, y + height - 18, UIColors.TextHint);
+                UIRenderer.DrawText("L=Take  R=+1  Shift=Inv  Carry+L/R=Deposit  Mid=Fav", x, y + height - 18, UIColors.TextHint);
             }
 
             // Deferred tooltip (drawn last, on top)
@@ -711,6 +746,14 @@ namespace StorageHub.UI
                 return;
             }
 
+            if (!_storage.IsCursorEmpty())
+            {
+                int deposited = _storage.DepositFromCursor(singleItem: isRightClick);
+                if (deposited > 0)
+                    MarkDirty();
+                return;
+            }
+
             if (isShiftHeld)
             {
                 // Shift-click: Move to inventory
@@ -728,6 +771,32 @@ namespace StorageHub.UI
                 // Left-click: Take stack and place on cursor
                 if (_storage.TakeItemToCursor(item.SourceChestIndex, item.SourceSlot, item.Stack))
                     MarkDirty();
+            }
+        }
+
+        private void HandleCursorDepositInput(int gridX, int gridY, int gridWidth, int gridHeight, bool pingMode)
+        {
+            if (pingMode) return;
+            if (_storage.IsCursorEmpty()) return;
+            if (!WidgetInput.IsMouseOver(gridX, gridY, gridWidth, gridHeight)) return;
+
+            if (WidgetInput.MouseLeftClick)
+            {
+                int deposited = _storage.DepositFromCursor(singleItem: false);
+                if (deposited > 0)
+                {
+                    MarkDirty();
+                }
+                WidgetInput.ConsumeClick();
+            }
+            else if (WidgetInput.MouseRightClick)
+            {
+                int deposited = _storage.DepositFromCursor(singleItem: true);
+                if (deposited > 0)
+                {
+                    MarkDirty();
+                }
+                WidgetInput.ConsumeRightClick();
             }
         }
 
