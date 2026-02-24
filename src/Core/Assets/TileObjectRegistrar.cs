@@ -121,88 +121,67 @@ namespace TerrariaModder.Core.Assets
             var asm = typeof(Main).Assembly;
             var todType = asm.GetType("Terraria.ObjectData.TileObjectData");
             if (todType == null)
-            {
-                _log?.Warn("[TileObjectRegistrar] TileObjectData type not found");
-                return;
-            }
+                throw new TileObjectDataNotReadyException("TileObjectData type not found");
 
             // If already registered, skip re-adding (important for retry path).
             if (HasTileObjectData(todType, runtimeType))
                 return;
 
             var newTileField = todType.GetField("newTile", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            object newTile = newTileField?.GetValue(null);
+            if (newTileField == null)
+                throw new TileObjectDataNotReadyException("TileObjectData.newTile field not found");
 
-            // Copy from closest built-in style template when available.
-            object styleTemplate = ResolveStyleTemplate(todType, def);
-            if (newTile == null && styleTemplate == null)
-                throw new TileObjectDataNotReadyException("TileObjectData templates are not initialized yet");
+            object styleTemplate = GetRequiredStyleTemplate(todType, def);
+            object data = CreateTileObjectDataCopy(todType, styleTemplate);
+            if (data == null)
+                throw new InvalidOperationException($"Could not clone TileObjectData style template for {def.DisplayName}");
 
-            if (newTile == null && styleTemplate != null)
+            try
             {
-                newTile = CreateTileObjectDataCopy(todType, styleTemplate);
-                if (newTile != null)
-                    newTileField?.SetValue(null, newTile);
+                WithTileObjectDataWriteAccess(todType, () =>
+                {
+                    // Keep newTile initialized from the same style for vanilla-side consumers,
+                    // but use direct _data assignment as our single registration path.
+                    newTileField.SetValue(null, data);
+                    ApplyTileObjectDataFields(data, def);
+                    AssignTileObjectDataEntry(todType, runtimeType, data);
+                });
+            }
+            catch (Exception ex)
+            {
+                Exception root = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
+                throw new InvalidOperationException(
+                    $"TileObjectData registration failed for tile {runtimeType} ({def.DisplayName}): {root.GetType().Name}: {root.Message}",
+                    root);
             }
 
-            bool registered = false;
-
-            if (newTile != null)
-            {
-                try
-                {
-                    WithTileObjectDataWriteAccess(todType, () =>
-                    {
-                        ApplyTileObjectDataFields(newTile, def);
-
-                        // TileObjectData.addTile(type)
-                        var addTile = todType.GetMethod("addTile", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(int) }, null)
-                            ?? todType.GetMethod("AddTile", BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(int) }, null);
-                        addTile?.Invoke(null, new object[] { runtimeType });
-                    });
-
-                    if (HasTileObjectData(todType, runtimeType))
-                    {
-                        registered = true;
-                    }
-                    else
-                    {
-                        _log?.Warn($"[TileObjectRegistrar] addTile path did not produce visible TileObjectData for tile {runtimeType} ({def.DisplayName}); retrying fallback");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Exception root = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
-                    _log?.Warn($"[TileObjectRegistrar] addTile path failed for tile {runtimeType} ({def.DisplayName}): {root.GetType().Name}: {root.Message}");
-                }
-            }
-
-            if (!registered)
-            {
-                if (newTile == null)
-                {
-                    _log?.Warn($"[TileObjectRegistrar] TileObjectData.newTile unavailable for tile {runtimeType} ({def.DisplayName}) - using direct registration fallback");
-                }
-
-                if (TryRegisterTileObjectDataDirect(todType, runtimeType, def, styleTemplate, out string fallbackReason))
-                {
-                    if (HasTileObjectData(todType, runtimeType))
-                    {
-                        registered = true;
-                    }
-                    else
-                    {
-                        _log?.Warn($"[TileObjectRegistrar] Direct registration path completed but TileObjectData still missing for tile {runtimeType} ({def.DisplayName})");
-                    }
-                }
-                else
-                {
-                    _log?.Warn($"[TileObjectRegistrar] Direct registration failed for tile {runtimeType} ({def.DisplayName}): {fallbackReason}");
-                }
-            }
-
-            if (!registered)
+            if (!HasTileObjectData(todType, runtimeType))
                 throw new InvalidOperationException($"Could not register TileObjectData for tile {runtimeType} ({def.DisplayName})");
+        }
+
+        private static void AssignTileObjectDataEntry(Type todType, int runtimeType, object data)
+        {
+            var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+            if (!(dataField?.GetValue(null) is IList list))
+                throw new InvalidOperationException("TileObjectData._data static list unavailable");
+
+            while (list.Count <= runtimeType)
+                list.Add(null);
+
+            list[runtimeType] = data;
+        }
+
+        private static object GetRequiredStyleTemplate(Type todType, TileDefinition def)
+        {
+            int width = Math.Max(1, def?.Width ?? 1);
+            int height = Math.Max(1, def?.Height ?? 1);
+            string styleFieldName = $"Style{width}x{height}";
+
+            object styleTemplate = GetStaticFieldValue(todType, styleFieldName);
+            if (styleTemplate == null)
+                throw new TileObjectDataNotReadyException($"TileObjectData.{styleFieldName} is not initialized yet");
+
+            return styleTemplate;
         }
 
         private static void ApplyTileObjectDataFields(object tileObjectData, TileDefinition def)
@@ -229,70 +208,17 @@ namespace TerrariaModder.Core.Assets
                 SetMember(tileObjectData, "LavaDeath", def.LavaDeath);
         }
 
-        private static bool TryRegisterTileObjectDataDirect(Type todType, int runtimeType, TileDefinition def, object styleTemplate, out string reason)
-        {
-            reason = null;
-            try
-            {
-                object data = CreateTileObjectDataCopy(todType, styleTemplate);
-                if (data == null)
-                {
-                    reason = "CreateTileObjectDataCopy returned null (style template unavailable)";
-                    return false;
-                }
-
-                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (!(dataField?.GetValue(null) is IList list))
-                {
-                    reason = "TileObjectData._data static list unavailable";
-                    return false;
-                }
-
-                WithTileObjectDataWriteAccess(todType, () =>
-                {
-                    ApplyTileObjectDataFields(data, def);
-
-                    while (list.Count <= runtimeType)
-                        list.Add(null);
-
-                    list[runtimeType] = data;
-                });
-
-                _log?.Debug($"[TileObjectRegistrar] Direct-registered TileObjectData for tile {runtimeType} ({def.DisplayName})");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Exception root = ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex;
-                reason = $"{root.GetType().Name}: {root.Message}";
-                return false;
-            }
-        }
-
         private static bool HasTileObjectData(Type todType, int runtimeType)
         {
             try
             {
                 var getTileData = todType.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
                     new[] { typeof(int), typeof(int), typeof(int) }, null);
-                if (getTileData != null)
-                {
-                    object existing = null;
-                    try { existing = getTileData.Invoke(null, new object[] { runtimeType, 0, 0 }); }
-                    catch { }
-                    if (existing != null) return true;
-                }
+                if (getTileData == null)
+                    return false;
 
-                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (dataField?.GetValue(null) is IList list &&
-                    runtimeType >= 0 &&
-                    runtimeType < list.Count &&
-                    list[runtimeType] != null)
-                {
-                    return true;
-                }
-
-                return false;
+                object existing = getTileData.Invoke(null, new object[] { runtimeType, 0, 0 });
+                return existing != null;
             }
             catch
             {
@@ -340,138 +266,6 @@ namespace TerrariaModder.Core.Assets
             {
                 return null;
             }
-        }
-
-        private static object ResolveStyleTemplate(Type todType, TileDefinition def)
-        {
-            int desiredWidth = Math.Max(1, def?.Width ?? 1);
-            int desiredHeight = Math.Max(1, def?.Height ?? 1);
-
-            // Preferred: static style templates.
-            object template = GetStaticFieldValue(todType, $"Style{def.Width}x{def.Height}")
-                ?? GetStaticFieldValue(todType, "Style1x1")
-                ?? GetStaticFieldValue(todType, "_baseObject");
-            if (template != null)
-                return template;
-
-            // Fallback: clone object data from known vanilla tiles via GetTileData(type, style, alternate).
-            // This works even when Style* static fields are null in this runtime.
-            int[] candidates;
-            if (def != null && def.IsContainer)
-            {
-                candidates = new[]
-                {
-                    (int)Terraria.ID.TileID.Containers,   // chest
-                    (int)Terraria.ID.TileID.Dressers,     // dresser
-                    (int)Terraria.ID.TileID.Furnaces      // generic 2x2 station fallback
-                };
-            }
-            else
-            {
-                candidates = new[]
-                {
-                    (int)Terraria.ID.TileID.Containers,   // chest 2x2
-                    (int)Terraria.ID.TileID.Furnaces,     // 3x2 station
-                    (int)Terraria.ID.TileID.WorkBenches   // 2x1
-                };
-            }
-
-            foreach (int typeId in candidates)
-            {
-                object data = TryGetTileData(todType, typeId, 0, 0);
-                if (data != null && MatchesTileObjectDataSize(data, desiredWidth, desiredHeight))
-                {
-                    _log?.Debug($"[TileObjectRegistrar] Using TileObjectData.GetTileData({typeId},0,0) as template");
-                    return data;
-                }
-            }
-
-            // Last resort: use an existing registered object-data entry (prefer same dimensions).
-            object fromDataList = ResolveTemplateFromDataList(todType, def);
-            if (fromDataList != null)
-                return fromDataList;
-
-            return null;
-        }
-
-        private static object TryGetTileData(Type todType, int type, int style, int alternate)
-        {
-            try
-            {
-                var getTileData = todType?.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
-                    new[] { typeof(int), typeof(int), typeof(int) }, null);
-                return getTileData?.Invoke(null, new object[] { type, style, alternate });
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static object ResolveTemplateFromDataList(Type todType, TileDefinition def)
-        {
-            try
-            {
-                var dataField = todType?.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (!(dataField?.GetValue(null) is IList list) || list.Count == 0)
-                    return null;
-
-                int desiredWidth = Math.Max(1, def?.Width ?? 1);
-                int desiredHeight = Math.Max(1, def?.Height ?? 1);
-
-                for (int i = 0; i < list.Count; i++)
-                {
-                    object entry = list[i];
-                    if (entry == null)
-                        continue;
-
-                    if (MatchesTileObjectDataSize(entry, desiredWidth, desiredHeight))
-                    {
-                        _log?.Debug($"[TileObjectRegistrar] Using TileObjectData._data[{i}] as template");
-                        return entry;
-                    }
-                }
-
-                return null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static bool MatchesTileObjectDataSize(object tileObjectData, int width, int height)
-        {
-            int? entryWidth = ReadIntMember(tileObjectData, "Width");
-            int? entryHeight = ReadIntMember(tileObjectData, "Height");
-            if (!entryWidth.HasValue || !entryHeight.HasValue)
-                return false;
-
-            return entryWidth.Value == width && entryHeight.Value == height;
-        }
-
-        private static int? ReadIntMember(object instance, string memberName)
-        {
-            if (instance == null || string.IsNullOrEmpty(memberName))
-                return null;
-
-            try
-            {
-                var type = instance.GetType();
-                var field = type.GetField(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (field != null)
-                    return Convert.ToInt32(field.GetValue(instance));
-
-                var prop = type.GetProperty(memberName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (prop != null && prop.CanRead)
-                    return Convert.ToInt32(prop.GetValue(instance, null));
-            }
-            catch
-            {
-                return null;
-            }
-
-            return null;
         }
 
         private static void WithTileObjectDataWriteAccess(Type todType, Action action)
@@ -532,11 +326,7 @@ namespace TerrariaModder.Core.Assets
 
         private static void RegisterMapEntry(int runtimeType, TileDefinition def)
         {
-            // Best effort map lookup fallback: map custom tile types to existing lookup index 0.
-            TrySetArrayEntry("Terraria.Map.MapHelper", "TileToLookup", runtimeType, 0);
-            TrySetArrayEntry("Terraria.Map.MapHelper", "tileLookup", runtimeType, 0);
-
-            // Best effort legend cache label replacement for custom tiles.
+            // Legend cache label replacement for custom tiles.
             try
             {
                 var langType = typeof(Lang);
@@ -578,22 +368,6 @@ namespace TerrariaModder.Core.Assets
                 var arr = field?.GetValue(null) as bool[];
                 if (arr != null && index >= 0 && index < arr.Length)
                     arr[index] = value;
-            }
-            catch { }
-        }
-
-        private static void TrySetArrayEntry(string typeName, string fieldName, int index, int value)
-        {
-            try
-            {
-                var type = typeof(Main).Assembly.GetType(typeName);
-                var field = type?.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                var arr = field?.GetValue(null) as Array;
-                if (arr == null || index < 0 || index >= arr.Length) return;
-
-                Type elemType = arr.GetType().GetElementType();
-                object converted = Convert.ChangeType(value, elemType);
-                arr.SetValue(converted, index);
             }
             catch { }
         }

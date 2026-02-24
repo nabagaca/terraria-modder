@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Terraria;
@@ -22,8 +21,6 @@ namespace TerrariaModder.Core.Assets
         private static object _tileReachSimple;
         private static MethodInfo _getItemSourceFromTileBreak;
         private static MethodInfo _newItemMethod;
-        private static readonly HashSet<int> _loggedFallbackPlacementTypes = new HashSet<int>();
-        private static readonly HashSet<int> _loggedMissingTileObjectDataTypes = new HashSet<int>();
 
         // Thread-local break context used by KillTile prefix/postfix.
         [ThreadStatic] private static bool _pendingBreak;
@@ -47,7 +44,6 @@ namespace TerrariaModder.Core.Assets
                 int patched = 0;
                 patched += PatchTileInteractionsUse();
                 patched += PatchTileObjectPlace();
-                patched += PatchPlaceTile();
                 patched += PatchKillTile();
                 patched += PatchInteractionRange();
 
@@ -175,30 +171,6 @@ namespace TerrariaModder.Core.Assets
             }
         }
 
-        private static int PatchPlaceTile()
-        {
-            try
-            {
-                var method = typeof(WorldGen).GetMethod("PlaceTile",
-                    BindingFlags.Public | BindingFlags.Static, null,
-                    new[] { typeof(int), typeof(int), typeof(int), typeof(bool), typeof(bool), typeof(int), typeof(int) }, null);
-                if (method == null)
-                {
-                    _log?.Warn("[TileBehaviorPatches] WorldGen.PlaceTile not found");
-                    return 0;
-                }
-
-                _harmony.Patch(method,
-                    prefix: new HarmonyMethod(typeof(TileBehaviorPatches), nameof(PlaceTile_Prefix)));
-                return 1;
-            }
-            catch (Exception ex)
-            {
-                _log?.Warn($"[TileBehaviorPatches] PlaceTile patch failed: {ex.Message}");
-                return 0;
-            }
-        }
-
         private static int PatchInteractionRange()
         {
             try
@@ -301,7 +273,7 @@ namespace TerrariaModder.Core.Assets
 
             try
             {
-                if (!CustomTileContainers.TryGetTileDefinition(i, j, out var def, out int tileType))
+                if (!CustomTileContainers.TryGetTileDefinition(i, j, out var def, out _))
                     return true;
 
                 if (!CustomTileContainers.TryGetTopLeft(i, j, def, out int topX, out int topY))
@@ -328,12 +300,6 @@ namespace TerrariaModder.Core.Assets
                 {
                     BreakCustomMultiTile(topX, topY, def, effectOnly, noItem);
                     return false;
-                }
-
-                // Fallback-safe behavior for multi-tiles only when object-data metadata is missing.
-                if (isMultiTile && !HasTileObjectData(tileType))
-                {
-                    return true;
                 }
 
                 _pendingBreak = true;
@@ -424,182 +390,6 @@ namespace TerrariaModder.Core.Assets
             }
         }
 
-        // WorldGen.PlaceTile(...) prefix
-        // Fallback path for custom multi-tiles when TileObjectData registration is unavailable.
-        private static bool PlaceTile_Prefix(int i, int j, int Type, bool mute, bool forced, int plr, int style, ref bool __result)
-        {
-            try
-            {
-                if (!TileRegistry.IsCustomTile(Type))
-                    return true;
-
-                var def = TileRegistry.GetDefinition(Type);
-                if (def == null)
-                    return true;
-
-                if (def.Width <= 1 && def.Height <= 1)
-                    return true;
-
-                if (HasTileObjectData(Type))
-                    return true; // Normal object placement path is available.
-
-                // Re-run registration in case TileObjectData was invalidated after
-                // an earlier successful pass.
-                TileObjectRegistrar.ApplyDefinitions();
-                if (HasTileObjectData(Type))
-                    return true;
-
-                if (_loggedFallbackPlacementTypes.Add(Type))
-                {
-                    _log?.Warn($"[TileBehaviorPatches] Using fallback placement for custom multi-tile {Type} ({def.DisplayName}) because TileObjectData is unavailable");
-                }
-
-                bool placed = TryPlaceCustomMultiTile(i, j, Type, def, out int topX, out int topY);
-                __result = placed;
-
-                if (placed)
-                    FinalizeCustomTilePlacement(def, topX, topY);
-
-                return false; // Skip vanilla PlaceTile for this custom multi-tile.
-            }
-            catch (Exception ex)
-            {
-                _log?.Debug($"[TileBehaviorPatches] PlaceTile fallback error: {ex.Message}");
-                __result = false;
-                return false;
-            }
-        }
-
-        private static bool HasTileObjectData(int tileType)
-        {
-            try
-            {
-                var todType = typeof(Main).Assembly.GetType("Terraria.ObjectData.TileObjectData");
-                if (todType == null)
-                {
-                    LogMissingTileObjectData(tileType, "TileObjectData type is unavailable");
-                    return false;
-                }
-
-                object existing = null;
-                var getTileData = todType?.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
-                    new[] { typeof(int), typeof(int), typeof(int) }, null);
-                if (getTileData != null)
-                {
-                    try { existing = getTileData.Invoke(null, new object[] { tileType, 0, 0 }); }
-                    catch (Exception ex)
-                    {
-                        LogMissingTileObjectData(tileType, $"GetTileData threw: {ex.GetType().Name}: {ex.Message}");
-                    }
-                    if (existing != null)
-                        return true;
-                }
-
-                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (dataField?.GetValue(null) is IList list &&
-                    tileType >= 0 &&
-                    tileType < list.Count &&
-                    list[tileType] != null)
-                {
-                    return true;
-                }
-
-                string reason;
-                if (getTileData == null)
-                {
-                    reason = "GetTileData method missing";
-                }
-                else if (!(dataField?.GetValue(null) is IList))
-                {
-                    reason = "TileObjectData._data missing";
-                }
-                else
-                {
-                    var dataList = dataField.GetValue(null) as IList;
-                    reason = dataList == null
-                        ? "TileObjectData._data null"
-                        : $"GetTileData=null and _data[{tileType}] missing (count={dataList.Count})";
-                }
-                LogMissingTileObjectData(tileType, reason);
-                return false;
-            }
-            catch
-            {
-                LogMissingTileObjectData(tileType, "unexpected exception in HasTileObjectData");
-                return false;
-            }
-        }
-
-        private static void LogMissingTileObjectData(int tileType, string reason)
-        {
-            try
-            {
-                if (!_loggedMissingTileObjectDataTypes.Add(tileType))
-                    return;
-
-                string name = TileRegistry.GetDefinition(tileType)?.DisplayName ?? "unknown";
-                _log?.Warn($"[TileBehaviorPatches] TileObjectData missing for tile {tileType} ({name}): {reason}");
-            }
-            catch { }
-        }
-
-        private static bool TryPlaceCustomMultiTile(int i, int j, int type, TileDefinition def, out int topX, out int topY)
-        {
-            topX = i;
-            topY = j;
-
-            if (def == null)
-                return false;
-
-            int width = Math.Max(1, def.Width);
-            int height = Math.Max(1, def.Height);
-            int originX = Math.Max(0, Math.Min(width - 1, def.OriginX));
-            int originY = Math.Max(0, Math.Min(height - 1, def.OriginY));
-
-            topX = i - originX;
-            topY = j - originY;
-
-            if (topX < 0 || topY < 0 || topX + width > Main.maxTilesX || topY + height > Main.maxTilesY)
-                return false;
-
-            for (int lx = 0; lx < width; lx++)
-            {
-                for (int ly = 0; ly < height; ly++)
-                {
-                    var tile = Framing.GetTileSafely(topX + lx, topY + ly);
-                    if (tile == null)
-                        return false;
-
-                    // Never place over active tiles in fallback mode; this prevents overlap artifacts.
-                    if (tile.active())
-                        return false;
-                }
-            }
-
-            if (!HasBottomSupport(topX, topY, width, height))
-                return false;
-
-            int stepX = Math.Max(1, def.CoordinateWidth + Math.Max(0, def.CoordinatePadding));
-            int[] rowOffsets = BuildRowFrameOffsets(def, height);
-
-            for (int lx = 0; lx < width; lx++)
-            {
-                for (int ly = 0; ly < height; ly++)
-                {
-                    int x = topX + lx;
-                    int y = topY + ly;
-                    var tile = Framing.GetTileSafely(x, y);
-                    tile.active(true);
-                    tile.type = (ushort)type;
-                    tile.frameX = (short)(lx * stepX);
-                    tile.frameY = (short)rowOffsets[ly];
-                }
-            }
-
-            WorldGen.RangeFrame(topX, topY, topX + width + 1, topY + height + 1);
-            return true;
-        }
-
         private static void NormalizeMultiTileFrames(int topX, int topY, int type, TileDefinition def)
         {
             if (def == null)
@@ -637,43 +427,6 @@ namespace TerrariaModder.Core.Assets
             }
 
             WorldGen.RangeFrame(topX, topY, topX + width + 1, topY + height + 1);
-        }
-
-        private static bool HasBottomSupport(int topX, int topY, int width, int height)
-        {
-            int supportY = topY + Math.Max(1, height);
-            if (supportY < 0 || supportY >= Main.maxTilesY)
-                return false;
-
-            var tileSolid = Main.tileSolid;
-            var tileSolidTop = Main.tileSolidTop;
-            if (tileSolid == null)
-                return false;
-
-            for (int lx = 0; lx < Math.Max(1, width); lx++)
-            {
-                int x = topX + lx;
-                if (x < 0 || x >= Main.maxTilesX)
-                    return false;
-
-                var support = Framing.GetTileSafely(x, supportY);
-                if (support == null || !support.active())
-                    return false;
-
-                int supportType = support.type;
-                if (supportType < 0 || supportType >= tileSolid.Length)
-                    return false;
-
-                bool solid = tileSolid[supportType];
-                bool solidTop = tileSolidTop != null &&
-                    supportType >= 0 &&
-                    supportType < tileSolidTop.Length &&
-                    tileSolidTop[supportType];
-                if (!solid && !solidTop)
-                    return false;
-            }
-
-            return true;
         }
 
         private static int[] BuildRowFrameOffsets(TileDefinition def, int height)
@@ -954,68 +707,20 @@ namespace TerrariaModder.Core.Assets
             int width = Math.Max(1, definition.Width);
             int height = Math.Max(1, definition.Height);
 
-            var layouts = BuildFrameLayouts(tileType, definition, height);
-            for (int i = 0; i < layouts.Count; i++)
-            {
-                if (TryResolveTopLeftFromLayout(
-                    tileX, tileY, tile.frameX, tile.frameY, tileType, width, height, layouts[i], out topX, out topY))
-                {
-                    return true;
-                }
-            }
+            if (!TryGetRuntimeFrameLayout(tileType, height, out var layout))
+                return false;
 
-            // Last-resort best effort based on definition values.
-            int fallbackStepX = Math.Max(1, definition.CoordinateWidth + Math.Max(0, definition.CoordinatePadding));
-            int fallbackLocalX = PositiveModulo(tile.frameX / fallbackStepX, width);
-            int fallbackLocalY = GetLocalFrameRow(
+            return TryResolveTopLeftFromLayout(
+                tileX,
+                tileY,
+                tile.frameX,
                 tile.frameY,
-                definition.CoordinateHeights,
-                Math.Max(0, definition.CoordinatePadding),
-                height);
-
-            topX = tileX - fallbackLocalX;
-            topY = tileY - fallbackLocalY;
-            return true;
-        }
-
-        private static List<FrameLayout> BuildFrameLayouts(int tileType, TileDefinition definition, int height)
-        {
-            var layouts = new List<FrameLayout>(4);
-
-            if (TryGetRuntimeFrameLayout(tileType, height, out var runtimeLayout))
-            {
-                layouts.Add(runtimeLayout);
-
-                if (runtimeLayout.CoordinatePadding > 0)
-                {
-                    var noPaddingRuntimeLayout = runtimeLayout;
-                    noPaddingRuntimeLayout.CoordinatePadding = 0;
-                    if (!ContainsEquivalentLayout(layouts, noPaddingRuntimeLayout))
-                        layouts.Add(noPaddingRuntimeLayout);
-                }
-            }
-
-            var defLayout = new FrameLayout
-            {
-                CoordinateWidth = Math.Max(1, definition?.CoordinateWidth ?? 16),
-                CoordinatePadding = Math.Max(0, definition?.CoordinatePadding ?? 0),
-                CoordinateHeights = definition?.CoordinateHeights != null && definition.CoordinateHeights.Length > 0
-                    ? (int[])definition.CoordinateHeights.Clone()
-                    : BuildDefaultCoordinateHeights(height)
-            };
-
-            if (!ContainsEquivalentLayout(layouts, defLayout))
-                layouts.Add(defLayout);
-
-            if (defLayout.CoordinatePadding > 0)
-            {
-                var noPaddingDefLayout = defLayout;
-                noPaddingDefLayout.CoordinatePadding = 0;
-                if (!ContainsEquivalentLayout(layouts, noPaddingDefLayout))
-                    layouts.Add(noPaddingDefLayout);
-            }
-
-            return layouts;
+                tileType,
+                width,
+                height,
+                layout,
+                out topX,
+                out topY);
         }
 
         private static bool TryGetRuntimeFrameLayout(int tileType, int height, out FrameLayout layout)
@@ -1059,22 +764,10 @@ namespace TerrariaModder.Core.Assets
             {
                 var getTileData = todType.GetMethod("GetTileData", BindingFlags.Public | BindingFlags.Static, null,
                     new[] { typeof(int), typeof(int), typeof(int) }, null);
-                if (getTileData != null)
-                {
-                    object data = null;
-                    try { data = getTileData.Invoke(null, new object[] { tileType, 0, 0 }); }
-                    catch { }
-                    if (data != null)
-                        return data;
-                }
+                if (getTileData == null)
+                    return null;
 
-                var dataField = todType.GetField("_data", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (dataField?.GetValue(null) is IList list &&
-                    tileType >= 0 &&
-                    tileType < list.Count)
-                {
-                    return list[tileType];
-                }
+                return getTileData.Invoke(null, new object[] { tileType, 0, 0 });
             }
             catch { }
 
@@ -1146,45 +839,6 @@ namespace TerrariaModder.Core.Assets
             catch { }
 
             return null;
-        }
-
-        private static bool ContainsEquivalentLayout(List<FrameLayout> layouts, FrameLayout candidate)
-        {
-            if (layouts == null)
-                return false;
-
-            for (int i = 0; i < layouts.Count; i++)
-            {
-                var existing = layouts[i];
-                if (existing.CoordinateWidth != candidate.CoordinateWidth)
-                    continue;
-                if (existing.CoordinatePadding != candidate.CoordinatePadding)
-                    continue;
-                if (!AreIntArraysEqual(existing.CoordinateHeights, candidate.CoordinateHeights))
-                    continue;
-
-                return true;
-            }
-
-            return false;
-        }
-
-        private static bool AreIntArraysEqual(int[] a, int[] b)
-        {
-            if (ReferenceEquals(a, b))
-                return true;
-            if (a == null || b == null)
-                return false;
-            if (a.Length != b.Length)
-                return false;
-
-            for (int i = 0; i < a.Length; i++)
-            {
-                if (a[i] != b[i])
-                    return false;
-            }
-
-            return true;
         }
 
         private static bool TryResolveTopLeftFromLayout(
