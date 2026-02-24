@@ -36,13 +36,11 @@ Extend your range to distant areas without upgrading tier:
 - Each relay adds additional range around its position
 - Perfect for connecting multiple bases
 
-### Painting Chest (Mysterious Painting)
-A painting that functions as a chest with upgradeable capacity:
-- Starts at 40 slots (like a normal chest)
-- Upgrade by consuming chest items (any item that places a chest tile)
-- 5 capacity levels: 40 → 80 → 200 → 1,000 → 5,000 slots
-- Higher levels require higher Storage Hub tier (Level 3 requires Tier 2, Level 4 requires Tier 3)
-- Can be enabled/disabled in mod config
+### Dedicated Storage Blocks
+Storage Hub now supports dedicated custom blocks:
+- **Storage Heart** opens the Storage Hub UI on right-click
+- **Storage Unit** is a true custom container tile for network storage
+- Optional mode `dedicatedBlocksOnly=true` restricts network registration to Storage Units only
 
 ## Controls
 
@@ -59,11 +57,21 @@ A painting that functions as a chest with upgradeable capacity:
 ### Items Tab
 Browse all items in your connected storage network. Use the search bar to filter by name, or click the Sort/Filter buttons to organize by category.
 
+Search also supports tag filters (MagicStorage-style). Examples:
+- `#weapon` (only weapons)
+- `#potion` (only potion-like consumables)
+- `#material -#favorite` (materials excluding favorited items)
+- `shark #ammo` (name + tag combined)
+
 ### Crafting Tab
 Shows recipes you can craft with available materials. Select a recipe to see ingredients and craft amounts. Toggle "All" to see partially-craftable recipes.
 
+The crafting search bar also supports the same `#tag` syntax for recipe outputs.
+
 ### Recipes Tab
 Look up any recipe by output item. Useful for planning what materials to gather.
+
+The recipes search bar supports the same `#tag` syntax for item filtering.
 
 ### Shimmer Tab
 Decraft items using shimmer. Requires the Shimmer unlock (10 Aether Block). Right-click items to protect specific prefixes from being shimmered.
@@ -81,7 +89,6 @@ The tab also handles vanilla edge cases: custom shimmer results (5 recipes retur
 - Upgrade tier (consume materials to increase chest range)
 - Unlock special features (water/honey/lava crafting, snow biome, graveyard, shimmer, altars)
 - View current tier and range
-- Manage Painting Chest upgrades (if enabled)
 
 ### Network Tab
 - See registered chests and their status
@@ -130,7 +137,7 @@ Consume specific items to unlock additional features:
 | Protect Hotbar | false | Prevent hotbar items from being consumed by crafting |
 | Recursive Crafting | true | Auto-craft missing intermediate materials |
 | Recursive Depth | 0 | Max sub-crafting depth (0 = unlimited) |
-| Painting Chest | true | Enable the Mysterious Painting feature |
+| Dedicated Blocks Only | true | Restrict network registration to Storage Unit tiles |
 
 ### Per-World Data
 
@@ -146,7 +153,6 @@ Includes:
 - Special unlocks
 - Favorite items
 - Relay positions
-- Painting chest level
 
 ## Keybind Customization
 
@@ -195,7 +201,7 @@ The session log is especially useful for item-related bugs (shimmer failures, cr
 - Station memory at Tier 3+
 - Shimmer decrafting with protection
 - Relay system for range extension
-- Painting Chest (Mysterious Painting) with 5 capacity tiers
+- Dedicated custom Storage Heart + Storage Unit blocks
 - Recursive crafting with configurable depth
 
 ## Multiplayer

@@ -108,6 +108,29 @@ namespace StorageHub.Storage
         bool TakeItemToCursor(int sourceChestIndex, int sourceSlot, int count);
 
         /// <summary>
+        /// Deposit the item currently on the mouse cursor into storage.
+        /// </summary>
+        /// <param name="singleItem">If true, only one item is deposited.</param>
+        /// <returns>Number of items actually deposited.</returns>
+        int DepositFromCursor(bool singleItem);
+
+        /// <summary>
+        /// Deposit an item from the player inventory into storage.
+        /// </summary>
+        /// <param name="inventorySlot">Main inventory slot index (0-49).</param>
+        /// <param name="singleItem">If true, only one item is deposited.</param>
+        /// <returns>Number of items actually deposited.</returns>
+        int DepositFromInventorySlot(int inventorySlot, bool singleItem);
+
+        /// <summary>
+        /// Quick stack inventory items into storage.
+        /// </summary>
+        /// <param name="includeHotbar">If false, slots 0-9 are skipped.</param>
+        /// <param name="includeFavorited">If false, favorited inventory items are skipped.</param>
+        /// <returns>Total number of items deposited into existing item types in storage.</returns>
+        int QuickStackInventory(bool includeHotbar, bool includeFavorited = false);
+
+        /// <summary>
         /// Check if cursor is empty.
         /// </summary>
         bool IsCursorEmpty();

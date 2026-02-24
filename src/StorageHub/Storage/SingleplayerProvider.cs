@@ -49,6 +49,7 @@ namespace StorageHub.Storage
         private static FieldInfo _itemTypeField;
         private static FieldInfo _itemStackField;
         private static FieldInfo _itemPrefixField;
+        private static FieldInfo _itemFavoritedField;
         private static FieldInfo _itemMaxStackField;
         private static FieldInfo _itemRarityField;
         private static FieldInfo _itemDamageField;
@@ -63,6 +64,25 @@ namespace StorageHub.Storage
         private static FieldInfo _itemCreateTileField;
         private static FieldInfo _itemCreateWallField;
         private static FieldInfo _itemMaterialField;
+        private static FieldInfo _itemVanityField;
+        private static FieldInfo _itemAmmoField;
+        private static FieldInfo _itemNotAmmoField;
+        private static FieldInfo _itemMeleeField;
+        private static FieldInfo _itemRangedField;
+        private static FieldInfo _itemMagicField;
+        private static FieldInfo _itemSummonField;
+        private static FieldInfo _itemThrownField;
+        private static FieldInfo _itemSentryField;
+        private static FieldInfo _itemShootField;
+        private static FieldInfo _itemHealLifeField;
+        private static FieldInfo _itemHealManaField;
+        private static FieldInfo _itemPotionField;
+        private static FieldInfo _itemDyeField;
+        private static FieldInfo _itemHairDyeField;
+        private static FieldInfo _itemMountTypeField;
+        private static FieldInfo _itemBuffTypeField;
+        private static FieldInfo _itemFishingPoleField;
+        private static FieldInfo _itemBaitField;
 
         private static FieldInfo _playerInventoryField;
         private static FieldInfo _playerBankField;
@@ -123,6 +143,7 @@ namespace StorageHub.Storage
                     _itemTypeField = _itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
                     _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
                     _itemPrefixField = _itemType.GetField("prefix", BindingFlags.Public | BindingFlags.Instance);
+                    _itemFavoritedField = _itemType.GetField("favorited", BindingFlags.Public | BindingFlags.Instance);
                     _itemMaxStackField = _itemType.GetField("maxStack", BindingFlags.Public | BindingFlags.Instance);
                     _itemRarityField = _itemType.GetField("rare", BindingFlags.Public | BindingFlags.Instance);
                     // Category fields
@@ -138,6 +159,25 @@ namespace StorageHub.Storage
                     _itemCreateTileField = _itemType.GetField("createTile", BindingFlags.Public | BindingFlags.Instance);
                     _itemCreateWallField = _itemType.GetField("createWall", BindingFlags.Public | BindingFlags.Instance);
                     _itemMaterialField = _itemType.GetField("material", BindingFlags.Public | BindingFlags.Instance);
+                    _itemVanityField = _itemType.GetField("vanity", BindingFlags.Public | BindingFlags.Instance);
+                    _itemAmmoField = _itemType.GetField("ammo", BindingFlags.Public | BindingFlags.Instance);
+                    _itemNotAmmoField = _itemType.GetField("notAmmo", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMeleeField = _itemType.GetField("melee", BindingFlags.Public | BindingFlags.Instance);
+                    _itemRangedField = _itemType.GetField("ranged", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMagicField = _itemType.GetField("magic", BindingFlags.Public | BindingFlags.Instance);
+                    _itemSummonField = _itemType.GetField("summon", BindingFlags.Public | BindingFlags.Instance);
+                    _itemThrownField = _itemType.GetField("thrown", BindingFlags.Public | BindingFlags.Instance);
+                    _itemSentryField = _itemType.GetField("sentry", BindingFlags.Public | BindingFlags.Instance);
+                    _itemShootField = _itemType.GetField("shoot", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHealLifeField = _itemType.GetField("healLife", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHealManaField = _itemType.GetField("healMana", BindingFlags.Public | BindingFlags.Instance);
+                    _itemPotionField = _itemType.GetField("potion", BindingFlags.Public | BindingFlags.Instance);
+                    _itemDyeField = _itemType.GetField("dye", BindingFlags.Public | BindingFlags.Instance);
+                    _itemHairDyeField = _itemType.GetField("hairDye", BindingFlags.Public | BindingFlags.Instance);
+                    _itemMountTypeField = _itemType.GetField("mountType", BindingFlags.Public | BindingFlags.Instance);
+                    _itemBuffTypeField = _itemType.GetField("buffType", BindingFlags.Public | BindingFlags.Instance);
+                    _itemFishingPoleField = _itemType.GetField("fishingPole", BindingFlags.Public | BindingFlags.Instance);
+                    _itemBaitField = _itemType.GetField("bait", BindingFlags.Public | BindingFlags.Instance);
                 }
 
                 if (_playerType != null)
@@ -878,6 +918,187 @@ namespace StorageHub.Storage
             }
         }
 
+        public int DepositFromCursor(bool singleItem)
+        {
+            try
+            {
+                if (_mouseItemField == null) return 0;
+
+                var mouseItem = _mouseItemField.GetValue(null);
+                if (mouseItem == null) return 0;
+
+                var snapshot = CreateSnapshot(mouseItem, SourceIndex.PlayerInventory, 0);
+                if (snapshot.IsEmpty) return 0;
+
+                int requested = singleItem ? 1 : snapshot.Stack;
+                if (requested <= 0) return 0;
+
+                var toDeposit = new ItemSnapshot(
+                    snapshot.ItemId,
+                    requested,
+                    snapshot.Prefix,
+                    snapshot.Name,
+                    snapshot.MaxStack,
+                    snapshot.Rarity,
+                    snapshot.SourceChestIndex,
+                    snapshot.SourceSlot);
+
+                int deposited = DepositItem(toDeposit, out _);
+                if (deposited <= 0) return 0;
+
+                int currentStack = GetSafeInt(_itemStackField, mouseItem, 0);
+                int newStack = currentStack - deposited;
+                if (newStack <= 0)
+                {
+                    ClearItem(mouseItem);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(mouseItem, newStack);
+                }
+
+                _log.Debug($"Deposited {deposited}x {snapshot.Name} from cursor");
+                return deposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DepositFromCursor failed: {ex.Message}");
+                return 0;
+            }
+        }
+
+        public int DepositFromInventorySlot(int inventorySlot, bool singleItem)
+        {
+            try
+            {
+                if (inventorySlot < 0 || inventorySlot >= 50) return 0;
+
+                var player = GetLocalPlayer();
+                if (player == null) return 0;
+
+                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                if (inventory == null || inventorySlot >= inventory.Length) return 0;
+
+                var slotItem = inventory.GetValue(inventorySlot);
+                if (slotItem == null) return 0;
+
+                var snapshot = CreateSnapshot(slotItem, SourceIndex.PlayerInventory, inventorySlot);
+                if (snapshot.IsEmpty) return 0;
+
+                int requested = singleItem ? 1 : snapshot.Stack;
+                if (requested <= 0) return 0;
+
+                var toDeposit = new ItemSnapshot(
+                    snapshot.ItemId,
+                    requested,
+                    snapshot.Prefix,
+                    snapshot.Name,
+                    snapshot.MaxStack,
+                    snapshot.Rarity,
+                    snapshot.SourceChestIndex,
+                    snapshot.SourceSlot);
+
+                int deposited = DepositItem(toDeposit, out _);
+                if (deposited <= 0) return 0;
+
+                int currentStack = GetSafeInt(_itemStackField, slotItem, 0);
+                int newStack = currentStack - deposited;
+                if (newStack <= 0)
+                {
+                    ClearItem(slotItem);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(slotItem, newStack);
+                }
+
+                _log.Debug($"Deposited {deposited}x {snapshot.Name} from inventory slot {inventorySlot}");
+                return deposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"DepositFromInventorySlot failed: {ex.Message}");
+                return 0;
+            }
+        }
+
+        public int QuickStackInventory(bool includeHotbar, bool includeFavorited = false)
+        {
+            try
+            {
+                var player = GetLocalPlayer();
+                if (player == null) return 0;
+
+                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                if (inventory == null) return 0;
+
+                var chests = _chestArrayField?.GetValue(null) as Array;
+                if (chests == null) return 0;
+
+                // Match vanilla/Magic Storage semantics: quick stack only into item types
+                // that already exist in storage.
+                var existingTypes = GetExistingStorageItemTypes(chests, _registry.GetRegisteredPositions());
+                if (existingTypes.Count == 0) return 0;
+
+                int start = includeHotbar ? 0 : 10;
+                int end = Math.Min(inventory.Length, 50);
+                if (start >= end) return 0;
+
+                int totalDeposited = 0;
+
+                for (int i = start; i < end; i++)
+                {
+                    var slotItem = inventory.GetValue(i);
+                    if (slotItem == null) continue;
+
+                    var snapshot = CreateSnapshot(slotItem, SourceIndex.PlayerInventory, i);
+                    if (snapshot.IsEmpty) continue;
+
+                    if (!includeFavorited && GetSafeBool(_itemFavoritedField, slotItem))
+                        continue;
+
+                    if (!existingTypes.Contains(snapshot.ItemId))
+                        continue;
+
+                    var toDeposit = new ItemSnapshot(
+                        snapshot.ItemId,
+                        snapshot.Stack,
+                        snapshot.Prefix,
+                        snapshot.Name,
+                        snapshot.MaxStack,
+                        snapshot.Rarity,
+                        snapshot.SourceChestIndex,
+                        snapshot.SourceSlot);
+
+                    int deposited = DepositItem(toDeposit, out _);
+                    if (deposited <= 0) continue;
+
+                    int currentStack = GetSafeInt(_itemStackField, slotItem, 0);
+                    int newStack = currentStack - deposited;
+                    if (newStack <= 0)
+                    {
+                        ClearItem(slotItem);
+                    }
+                    else
+                    {
+                        _itemStackField?.SetValue(slotItem, newStack);
+                    }
+
+                    totalDeposited += deposited;
+                }
+
+                if (totalDeposited > 0)
+                    _log.Debug($"Quick-stacked {totalDeposited} item(s) from inventory");
+
+                return totalDeposited;
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"QuickStackInventory failed: {ex.Message}");
+                return 0;
+            }
+        }
+
         public bool IsCursorEmpty()
         {
             try
@@ -925,6 +1146,68 @@ namespace StorageHub.Storage
         {
             if (prefix <= 0 || _itemPrefixMethod == null) return;
             _itemPrefixMethod.Invoke(item, new object[] { prefix });
+        }
+
+        private void ClearItem(object item)
+        {
+            if (item == null) return;
+
+            try
+            {
+                if (!InvokeSetDefaults(item, 0))
+                {
+                    _itemTypeField?.SetValue(item, 0);
+                    _itemStackField?.SetValue(item, 0);
+                }
+                else
+                {
+                    _itemStackField?.SetValue(item, 0);
+                }
+
+                if (_itemPrefixField != null)
+                {
+                    if (_itemPrefixField.FieldType == typeof(byte))
+                        _itemPrefixField.SetValue(item, (byte)0);
+                    else
+                        _itemPrefixField.SetValue(item, 0);
+                }
+            }
+            catch
+            {
+                // Best effort clear.
+            }
+        }
+
+        private HashSet<int> GetExistingStorageItemTypes(Array chests, IEnumerable<(int x, int y)> positions)
+        {
+            var types = new HashSet<int>();
+            if (chests == null || positions == null)
+                return types;
+
+            foreach (var pos in positions)
+            {
+                int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                if (chestIndex < 0) continue;
+
+                var chest = chests.GetValue(chestIndex);
+                if (chest == null) continue;
+
+                var itemArray = _chestItemField?.GetValue(chest) as Array;
+                if (itemArray == null) continue;
+
+                for (int i = 0; i < itemArray.Length; i++)
+                {
+                    var chestItem = itemArray.GetValue(i);
+                    if (chestItem == null) continue;
+
+                    int type = GetSafeInt(_itemTypeField, chestItem, 0);
+                    int stack = GetSafeInt(_itemStackField, chestItem, 0);
+                    if (type > 0 && stack > 0)
+                        types.Add(type);
+                }
+            }
+
+            return types;
         }
 
         private object GetLocalPlayer()
@@ -1178,6 +1461,43 @@ namespace StorageHub.Storage
                 int createTile = GetSafeInt(_itemCreateTileField, item, -1);
                 int createWall = GetSafeInt(_itemCreateWallField, item, -1);
                 bool material = GetSafeBool(_itemMaterialField, item);
+                bool vanity = GetSafeBool(_itemVanityField, item);
+                int ammo = GetSafeInt(_itemAmmoField, item, 0);
+                bool notAmmo = GetSafeBool(_itemNotAmmoField, item);
+                bool melee = GetSafeBool(_itemMeleeField, item);
+                bool ranged = GetSafeBool(_itemRangedField, item);
+                bool magic = GetSafeBool(_itemMagicField, item);
+                bool summon = GetSafeBool(_itemSummonField, item);
+                bool thrown = GetSafeBool(_itemThrownField, item);
+                bool sentry = GetSafeBool(_itemSentryField, item);
+                int shoot = GetSafeInt(_itemShootField, item, 0);
+                int healLife = GetSafeInt(_itemHealLifeField, item, 0);
+                int healMana = GetSafeInt(_itemHealManaField, item, 0);
+                bool potion = GetSafeBool(_itemPotionField, item);
+                int dye = GetSafeInt(_itemDyeField, item, 0);
+                int hairDye = GetSafeInt(_itemHairDyeField, item, -1);
+                int mountType = GetSafeInt(_itemMountTypeField, item, -1);
+                int buffType = GetSafeInt(_itemBuffTypeField, item, 0);
+                int fishingPole = GetSafeInt(_itemFishingPoleField, item, 0);
+                int bait = GetSafeInt(_itemBaitField, item, 0);
+
+                bool isTool = pick > 0 || axe > 0 || hammer > 0;
+                bool isWeapon = damage > 0 && !isTool && ammo == 0;
+                bool isMelee = melee && isWeapon;
+                bool isRanged = ranged && isWeapon;
+                bool isMagic = magic && isWeapon;
+                bool isSummon = (summon || sentry) && isWeapon;
+                bool isThrown = thrown && damage > 0 && (ammo == 0 || notAmmo) && shoot > 0;
+                if (!isMelee && !isRanged && !isMagic && !isSummon && !isThrown && isWeapon)
+                    isMelee = true; // Fallback for versions where class flags are unavailable
+
+                bool isAmmo = ammo > 0 && damage > 0;
+                bool isPlaceable = createTile >= 0 || createWall >= 0;
+                bool isVanity = vanity || dye > 0 || hairDye >= 0;
+                bool isPotion = consumable && (healLife > 0 || healMana > 0 || buffType > 0 || potion);
+                bool isFishing = fishingPole > 0 || bait > 0;
+                bool isEquipment = accessory || mountType >= 0 || buffType > 0 || isFishing;
+                bool isMaterial = material && !isPlaceable && !isWeapon && !isTool && !accessory && !isVanity;
 
                 return new ItemSnapshot(
                     itemType,
@@ -1190,13 +1510,31 @@ namespace StorageHub.Storage
                     sourceSlot,
                     damage: damage > 0 ? damage : (int?)null,
                     isPickaxe: pick > 0,
+                    pickPower: pick,
                     isAxe: axe > 0,
+                    axePower: axe,
                     isHammer: hammer > 0,
-                    isArmor: headSlot >= 0 || bodySlot >= 0 || legSlot >= 0,
+                    hammerPower: hammer,
+                    isArmor: !vanity && (headSlot >= 0 || bodySlot >= 0 || legSlot >= 0),
                     isAccessory: accessory,
                     isConsumable: consumable,
-                    isPlaceable: createTile >= 0 || createWall >= 0,
-                    isMaterial: material
+                    isPlaceable: isPlaceable,
+                    isMaterial: isMaterial,
+                    isVanity: isVanity,
+                    isAmmo: isAmmo,
+                    ammoType: ammo,
+                    isPotion: isPotion,
+                    healLife: healLife,
+                    healMana: healMana,
+                    isFishing: isFishing,
+                    fishingPolePower: fishingPole,
+                    fishingBaitPower: bait,
+                    isEquipment: isEquipment,
+                    isMelee: isMelee,
+                    isRanged: isRanged,
+                    isMagic: isMagic,
+                    isSummon: isSummon,
+                    isThrown: isThrown
                 );
             }
             catch (Exception ex)
@@ -1216,7 +1554,8 @@ namespace StorageHub.Storage
             {
                 var val = field.GetValue(obj);
                 if (val == null) return defaultValue;
-                return (int)val;
+                if (val is int i) return i;
+                return Convert.ToInt32(val);
             }
             catch
             {
@@ -1234,7 +1573,8 @@ namespace StorageHub.Storage
             {
                 var val = field.GetValue(obj);
                 if (val == null) return false;
-                return (bool)val;
+                if (val is bool b) return b;
+                return Convert.ToBoolean(val);
             }
             catch
             {
