@@ -286,32 +286,7 @@ namespace TerrariaModder.Core.Assets
 
                 NormalizeMultiTileFrames(topX, topY, type, def);
 
-                if (def.IsContainer)
-                {
-                    int chestIndex = Chest.FindChest(topX, topY);
-                    if (chestIndex < 0)
-                        chestIndex = Chest.CreateChest(topX, topY, -1);
-
-                    if (chestIndex >= 0)
-                    {
-                        var chest = Main.chest[chestIndex];
-                        if (chest != null)
-                        {
-                            if (def.ContainerCapacity > 0 && chest.maxItems != def.ContainerCapacity)
-                            {
-                                var resize = chest.GetType().GetMethod("Resize", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(int) }, null);
-                                resize?.Invoke(chest, new object[] { def.ContainerCapacity });
-                            }
-
-                            chest.name = string.IsNullOrEmpty(def.ContainerName) ? def.DisplayName : def.ContainerName;
-                        }
-                    }
-                }
-
-                try { def.OnPlace?.Invoke(topX, topY); }
-                catch (Exception ex) { _log?.Debug($"[TileBehaviorPatches] OnPlace hook error: {ex.Message}"); }
-
-                TryPlayTileSound(def.HitSoundStyle, topX, topY);
+                FinalizeCustomTilePlacement(def, topX, topY);
             }
             catch (Exception ex)
             {
@@ -404,7 +379,7 @@ namespace TerrariaModder.Core.Assets
                         RemoveCustomChest(_pendingBreakTopX, _pendingBreakTopY);
                     }
 
-                    TryPlayTileSound(_pendingBreakDef.HitSoundStyle, _pendingBreakTopX, _pendingBreakTopY);
+                    TryPlayTileHitSound(_pendingBreakDef.HitSoundStyle, _pendingBreakTopX, _pendingBreakTopY);
 
                     if (!effectOnly && !noItem && !string.IsNullOrEmpty(_pendingBreakDef.DropItemId))
                     {
@@ -483,13 +458,7 @@ namespace TerrariaModder.Core.Assets
                 __result = placed;
 
                 if (placed)
-                {
-                    if (def.IsContainer)
-                        InitializeContainerAt(topX, topY, def);
-
-                    try { def.OnPlace?.Invoke(topX, topY); } catch { }
-                    TryPlayTileSound(def.HitSoundStyle, topX, topY);
-                }
+                    FinalizeCustomTilePlacement(def, topX, topY);
 
                 return false; // Skip vanilla PlaceTile for this custom multi-tile.
             }
@@ -759,6 +728,18 @@ namespace TerrariaModder.Core.Assets
             chest.name = string.IsNullOrEmpty(def.ContainerName) ? def.DisplayName : def.ContainerName;
         }
 
+        private static void FinalizeCustomTilePlacement(TileDefinition def, int topX, int topY)
+        {
+            if (def == null)
+                return;
+
+            if (def.IsContainer)
+                InitializeContainerAt(topX, topY, def);
+
+            try { def.OnPlace?.Invoke(topX, topY); }
+            catch (Exception ex) { _log?.Debug($"[TileBehaviorPatches] OnPlace hook error: {ex.Message}"); }
+        }
+
         private static bool ChestHasItems(int chestIndex)
         {
             if (chestIndex < 0 || chestIndex >= Main.maxChests) return false;
@@ -832,7 +813,7 @@ namespace TerrariaModder.Core.Assets
                 RemoveCustomChest(topX, topY);
             }
 
-            TryPlayTileSound(def.HitSoundStyle, topX, topY);
+            TryPlayTileHitSound(def.HitSoundStyle, topX, topY);
 
             if (!effectOnly && !noItem && !string.IsNullOrEmpty(def.DropItemId))
             {
@@ -870,9 +851,9 @@ namespace TerrariaModder.Core.Assets
             }
         }
 
-        private static void TryPlayTileSound(int soundId, int tileX, int tileY)
+        private static void TryPlayTileHitSound(int soundStyle, int tileX, int tileY)
         {
-            if (soundId < 0) return;
+            if (soundStyle < 0) return;
 
             try
             {
@@ -880,15 +861,38 @@ namespace TerrariaModder.Core.Assets
                 if (seType == null)
                     return;
 
+                MethodInfo play6 = null;
+                MethodInfo play3 = null;
                 foreach (var m in seType.GetMethods(BindingFlags.Public | BindingFlags.Static))
                 {
                     if (m.Name != "PlaySound") continue;
                     var p = m.GetParameters();
                     if (p.Length == 6 && p[0].ParameterType == typeof(int))
                     {
-                        m.Invoke(null, new object[] { soundId, tileX * 16, tileY * 16, 1, 1f, 0f });
-                        return;
+                        play6 = m;
+                        break;
                     }
+
+                    if (play3 == null &&
+                        p.Length == 3 &&
+                        p[0].ParameterType == typeof(int) &&
+                        p[1].ParameterType == typeof(int) &&
+                        p[2].ParameterType == typeof(int))
+                    {
+                        play3 = m;
+                    }
+                }
+
+                if (play6 != null)
+                {
+                    // Sound type 0 is tile/ground hit; HitSoundStyle maps to the style variant.
+                    play6.Invoke(null, new object[] { 0, tileX * 16, tileY * 16, Math.Max(0, soundStyle), 1f, 0f });
+                    return;
+                }
+
+                if (play3 != null)
+                {
+                    play3.Invoke(null, new object[] { 0, tileX * 16, tileY * 16 });
                 }
             }
             catch { }
