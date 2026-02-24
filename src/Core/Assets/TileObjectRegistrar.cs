@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Reflection;
 using Terraria;
+using Terraria.DataStructures;
+using Terraria.Enums;
 using TerrariaModder.Core.Logging;
 
 namespace TerrariaModder.Core.Assets
@@ -203,6 +205,18 @@ namespace TerrariaModder.Core.Assets
 
             object origin = CreatePoint16(def.OriginX, def.OriginY);
             if (origin != null) SetMember(tileObjectData, "Origin", origin);
+
+            // Allow object-on-object placement (for machine-style 2x2 tiles) when the tile
+            // declares a non-solid top surface. Without this, many style templates only anchor
+            // to fully solid blocks, which prevents stacking custom components.
+            if (!def.Solid && def.SolidTop && def.Width > 0)
+            {
+                var anchorBottom = new AnchorData(
+                    AnchorType.SolidTile | AnchorType.SolidWithTop | AnchorType.Table,
+                    def.Width,
+                    0);
+                SetMember(tileObjectData, "AnchorBottom", anchorBottom);
+            }
 
             if (def.IsContainer)
                 SetMember(tileObjectData, "LavaDeath", def.LavaDeath);
