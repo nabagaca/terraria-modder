@@ -142,7 +142,7 @@ namespace StorageHub
             // Register keybind
             context.RegisterKeybind("toggle", "Toggle Storage Hub", "Open/close the Storage Hub UI", "F5", OnToggleUI);
 
-            // Register dedicated custom tiles/items (Storage Heart + Storage Unit)
+            // Register dedicated custom tiles/items (Storage Core + Storage Unit)
             DedicatedBlocksManager.Register(
                 context,
                 _log,
@@ -162,7 +162,7 @@ namespace StorageHub
             _dedicatedBlocksOnly = _context.Config.Get("dedicatedBlocksOnly", true);
 
             _log.Info(_dedicatedBlocksOnly
-                ? "StorageHub initialized - use Storage Heart/Access to open"
+                ? "StorageHub initialized - use Storage Core/Access to open"
                 : "StorageHub initialized - Press F5 to open");
         }
 
@@ -290,7 +290,7 @@ namespace StorageHub
 
             if (_dedicatedBlocksOnly)
             {
-                GameText.Show("Use a Storage Heart or Storage Access to open Storage Hub.");
+                GameText.Show("Use a Storage Core or Storage Access to open Storage Hub.");
                 return;
             }
 
@@ -545,13 +545,13 @@ namespace StorageHub
 
             if (!_networkResolver.TryResolveNetwork(tileX, tileY, out var network) || !network.HasHeart)
             {
-                GameText.Show("This access point is not connected to a Storage Heart.");
+                GameText.Show("This access point is not connected to a Storage Core.");
                 return false;
             }
 
             if (network.UnitCount <= 0)
             {
-                GameText.Show("A Storage Heart needs at least one connected Storage Drive.");
+                GameText.Show("A Storage Core needs at least one connected Storage Drive.");
                 return false;
             }
 

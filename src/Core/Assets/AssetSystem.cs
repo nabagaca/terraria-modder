@@ -69,6 +69,7 @@ namespace TerrariaModder.Core.Assets
             DrawPatches.Initialize(logger);
             TileObjectRegistrar.Initialize(logger);
             TileBehaviorPatches.Initialize(logger);
+            PlayerAdjTileSafetyPatches.Initialize(logger);
             PendingItemsUI.Initialize(logger);
 
             _initialized = true;
@@ -128,6 +129,7 @@ namespace TerrariaModder.Core.Assets
                     TileTextureLoader.ApplyPatches();
                     TileObjectRegistrar.ApplyDefinitions();
                     TileBehaviorPatches.ApplyPatches();
+                    PlayerAdjTileSafetyPatches.ApplyPatches();
                 }
 
                 // Item runtime behavior patches.

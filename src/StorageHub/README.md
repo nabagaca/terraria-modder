@@ -47,9 +47,13 @@ Extend your range to distant areas without upgrading tier:
 
 ### Dedicated Storage Blocks
 Storage Hub now supports dedicated custom blocks:
-- **Storage Heart** opens the Storage Hub UI on right-click
+- **Storage Core** opens the Storage Hub UI on right-click
 - **Storage Unit** is a true custom container tile for network storage
 - Optional mode `dedicatedBlocksOnly=true` restricts network registration to Storage Units only
+
+### TODO / Known Limitation
+- **Disk identity storage** currently uses the disk item's prefix field as a UID (`1..255`), so each disk item type is limited to 255 unique disk identities per world.
+- **TODO:** Replace prefix-backed UID with dedicated persistent disk metadata/UUID storage.
 
 ## Controls
 
@@ -210,7 +214,7 @@ The session log is especially useful for item-related bugs (shimmer failures, cr
 - Station memory at Tier 3+
 - Shimmer decrafting with protection
 - Relay system for range extension
-- Dedicated custom Storage Heart + Storage Unit blocks
+- Dedicated custom Storage Core + Storage Unit blocks
 - Recursive crafting with configurable depth
 
 ## Multiplayer

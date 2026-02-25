@@ -93,7 +93,7 @@ namespace StorageHub.DedicatedBlocks
 
             context.RegisterTile("storage-heart", new TileDefinition
             {
-                DisplayName = "Storage Heart",
+                DisplayName = "Storage Core",
                 Texture = "assets/tiles/storage-heart.png",
                 Width = 2,
                 Height = 2,
@@ -285,7 +285,7 @@ namespace StorageHub.DedicatedBlocks
 
             context.RegisterItem("storage-heart-item", new ItemDefinition
             {
-                DisplayName = "Storage Heart",
+                DisplayName = "Storage Core",
                 Tooltip = new[] { "Core of your storage network", "Right click the placed block to open Storage Hub" },
                 Texture = "assets/items/storage-heart.png",
                 CreateTileId = TileHeartId,
@@ -327,7 +327,7 @@ namespace StorageHub.DedicatedBlocks
             {
                 DisplayName = "Basic Storage Disk",
                 Tooltip = new[] { "Stores up to 80 item stacks", "Insert into a Storage Drive" },
-                Texture = "assets/items/storage-unit.png",
+                Texture = "assets/items/storage-disk.png",
                 Width = 24,
                 Height = 24,
                 MaxStack = 1,
@@ -345,7 +345,7 @@ namespace StorageHub.DedicatedBlocks
             {
                 DisplayName = "Improved Storage Disk",
                 Tooltip = new[] { "Stores up to 160 item stacks", "Insert into a Storage Drive" },
-                Texture = "assets/items/storage-unit.png",
+                Texture = "assets/items/storage-disk.png",
                 Width = 24,
                 Height = 24,
                 MaxStack = 1,
@@ -363,7 +363,7 @@ namespace StorageHub.DedicatedBlocks
             {
                 DisplayName = "Advanced Storage Disk",
                 Tooltip = new[] { "Stores up to 320 item stacks", "Insert into a Storage Drive" },
-                Texture = "assets/items/storage-unit.png",
+                Texture = "assets/items/storage-disk.png",
                 Width = 24,
                 Height = 24,
                 MaxStack = 1,
@@ -381,7 +381,7 @@ namespace StorageHub.DedicatedBlocks
             {
                 DisplayName = "Quantum Storage Disk",
                 Tooltip = new[] { "Stores up to 640 item stacks", "Insert into a Storage Drive" },
-                Texture = "assets/items/storage-unit.png",
+                Texture = "assets/items/storage-disk.png",
                 Width = 24,
                 Height = 24,
                 MaxStack = 1,

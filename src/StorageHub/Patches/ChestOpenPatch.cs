@@ -206,7 +206,7 @@ namespace StorageHub.Patches
                     if (_requiredTileType >= 0 && tileType == _requiredTileType)
                     {
                         CloseCurrentChest();
-                        GameText.Show("Storage Units cannot be opened directly. Use Storage Heart or Storage Access.");
+                        GameText.Show("Storage Units cannot be opened directly. Use Storage Core or Storage Access.");
                         _log.Debug($"Blocked direct Storage Unit open at ({x}, {y})");
                     }
 
