@@ -556,7 +556,7 @@ namespace StorageHub.UI
             // Help text at bottom - changes based on ping mode
             if (_pingMode)
             {
-                UIRenderer.DrawText("PING MODE: Click item to locate chest", x, y + height - 18, UIColors.Accent);
+                UIRenderer.DrawText("PING MODE: Click item to locate storage drive", x, y + height - 18, UIColors.Accent);
             }
             else
             {

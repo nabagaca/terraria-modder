@@ -1,4 +1,5 @@
 using System;
+using StorageHub.Storage;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Assets;
 using TerrariaModder.Core.Logging;
@@ -23,11 +24,22 @@ namespace StorageHub.DedicatedBlocks
         public const string ItemUnitId = "storage-hub:storage-unit-item";
         public const string ItemAccessId = "storage-hub:storage-access-item";
         public const string ItemCraftingAccessId = "storage-hub:storage-crafting-access-item";
+        public const string ItemDiskBasicId = "storage-hub:storage-disk-basic-item";
+        public const string ItemDiskImprovedId = "storage-hub:storage-disk-improved-item";
+        public const string ItemDiskAdvancedId = "storage-hub:storage-disk-advanced-item";
+        public const string ItemDiskQuantumId = "storage-hub:storage-disk-quantum-item";
+
+        private static bool _diskItemTypesCached;
+        private static int _basicDiskItemType = -1;
+        private static int _improvedDiskItemType = -1;
+        private static int _advancedDiskItemType = -1;
+        private static int _quantumDiskItemType = -1;
 
         public static void Register(
             ModContext context,
             ILogger log,
             Func<int, int, bool> onStorageHeartRightClick,
+            Func<int, int, bool> onStorageDriveRightClick,
             Func<int, int, bool> onStorageAccessRightClick,
             Func<int, int, bool> onStorageCraftingAccessRightClick)
         {
@@ -118,7 +130,7 @@ namespace StorageHub.DedicatedBlocks
 
             context.RegisterTile("storage-unit", new TileDefinition
             {
-                DisplayName = "Storage Unit",
+                DisplayName = "Storage Drive",
                 Texture = "assets/tiles/storage-unit.png",
                 Width = 2,
                 Height = 2,
@@ -139,10 +151,22 @@ namespace StorageHub.DedicatedBlocks
                 MapColorB = 140,
                 IsContainer = true,
                 RegisterAsBasicChest = false,
-                ContainerInteractable = false,
-                ContainerCapacity = 40,
-                ContainerName = "Storage Unit",
-                DropItemId = ItemUnitId
+                ContainerCapacity = 8,
+                ContainerInteractable = true,
+                ContainerName = "Storage Drive",
+                DropItemId = ItemUnitId,
+                OnRightClick = (x, y, player) =>
+                {
+                    try
+                    {
+                        return onStorageDriveRightClick?.Invoke(x, y) ?? false;
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Error($"Storage drive right-click error: {ex.Message}");
+                        return false;
+                    }
+                }
             });
 
             context.RegisterTile("storage-access", new TileDefinition
@@ -281,8 +305,8 @@ namespace StorageHub.DedicatedBlocks
 
             context.RegisterItem("storage-unit-item", new ItemDefinition
             {
-                DisplayName = "Storage Unit",
-                Tooltip = new[] { "Stores items for a connected Storage Heart", "Cannot be opened directly" },
+                DisplayName = "Storage Drive",
+                Tooltip = new[] { "Holds up to 8 storage disks", "Disk contents move with the disk item" },
                 Texture = "assets/items/storage-unit.png",
                 CreateTileId = TileUnitId,
                 PlaceStyle = 0,
@@ -297,6 +321,78 @@ namespace StorageHub.DedicatedBlocks
                 AutoReuse = true,
                 Rarity = 1,
                 Value = 2500
+            });
+
+            context.RegisterItem("storage-disk-basic-item", new ItemDefinition
+            {
+                DisplayName = "Basic Storage Disk",
+                Tooltip = new[] { "Stores up to 80 item stacks", "Insert into a Storage Drive" },
+                Texture = "assets/items/storage-unit.png",
+                Width = 24,
+                Height = 24,
+                MaxStack = 1,
+                Consumable = false,
+                UseStyle = 1,
+                UseTurn = true,
+                UseTime = 10,
+                UseAnimation = 15,
+                AutoReuse = false,
+                Rarity = 1,
+                Value = 2000
+            });
+
+            context.RegisterItem("storage-disk-improved-item", new ItemDefinition
+            {
+                DisplayName = "Improved Storage Disk",
+                Tooltip = new[] { "Stores up to 160 item stacks", "Insert into a Storage Drive" },
+                Texture = "assets/items/storage-unit.png",
+                Width = 24,
+                Height = 24,
+                MaxStack = 1,
+                Consumable = false,
+                UseStyle = 1,
+                UseTurn = true,
+                UseTime = 10,
+                UseAnimation = 15,
+                AutoReuse = false,
+                Rarity = 2,
+                Value = 5000
+            });
+
+            context.RegisterItem("storage-disk-advanced-item", new ItemDefinition
+            {
+                DisplayName = "Advanced Storage Disk",
+                Tooltip = new[] { "Stores up to 320 item stacks", "Insert into a Storage Drive" },
+                Texture = "assets/items/storage-unit.png",
+                Width = 24,
+                Height = 24,
+                MaxStack = 1,
+                Consumable = false,
+                UseStyle = 1,
+                UseTurn = true,
+                UseTime = 10,
+                UseAnimation = 15,
+                AutoReuse = false,
+                Rarity = 3,
+                Value = 12000
+            });
+
+            context.RegisterItem("storage-disk-quantum-item", new ItemDefinition
+            {
+                DisplayName = "Quantum Storage Disk",
+                Tooltip = new[] { "Stores up to 640 item stacks", "Insert into a Storage Drive" },
+                Texture = "assets/items/storage-unit.png",
+                Width = 24,
+                Height = 24,
+                MaxStack = 1,
+                Consumable = false,
+                UseStyle = 1,
+                UseTurn = true,
+                UseTime = 10,
+                UseAnimation = 15,
+                AutoReuse = false,
+                Rarity = 4,
+                Value = 30000
             });
 
             context.RegisterItem("storage-access-item", new ItemDefinition
@@ -368,6 +464,63 @@ namespace StorageHub.DedicatedBlocks
         public static int ResolveStorageUnitTileType()
         {
             return AssetSystem.GetTileRuntimeType(TileUnitId);
+        }
+
+        public static bool TryGetDiskTierForItemType(int itemType, out int tier)
+        {
+            tier = StorageDiskCatalog.None;
+            if (itemType <= 0)
+                return false;
+
+            EnsureDiskItemTypesResolved();
+
+            if (itemType == _basicDiskItemType)
+            {
+                tier = StorageDiskCatalog.Basic;
+                return true;
+            }
+            if (itemType == _improvedDiskItemType)
+            {
+                tier = StorageDiskCatalog.Improved;
+                return true;
+            }
+            if (itemType == _advancedDiskItemType)
+            {
+                tier = StorageDiskCatalog.Advanced;
+                return true;
+            }
+            if (itemType == _quantumDiskItemType)
+            {
+                tier = StorageDiskCatalog.Quantum;
+                return true;
+            }
+
+            return false;
+        }
+
+        public static int ResolveDiskItemType(int diskTier)
+        {
+            EnsureDiskItemTypesResolved();
+            return diskTier switch
+            {
+                StorageDiskCatalog.Basic => _basicDiskItemType,
+                StorageDiskCatalog.Improved => _improvedDiskItemType,
+                StorageDiskCatalog.Advanced => _advancedDiskItemType,
+                StorageDiskCatalog.Quantum => _quantumDiskItemType,
+                _ => -1
+            };
+        }
+
+        private static void EnsureDiskItemTypesResolved()
+        {
+            if (_diskItemTypesCached)
+                return;
+
+            _basicDiskItemType = ItemRegistry.ResolveItemType(ItemDiskBasicId);
+            _improvedDiskItemType = ItemRegistry.ResolveItemType(ItemDiskImprovedId);
+            _advancedDiskItemType = ItemRegistry.ResolveItemType(ItemDiskAdvancedId);
+            _quantumDiskItemType = ItemRegistry.ResolveItemType(ItemDiskQuantumId);
+            _diskItemTypesCached = true;
         }
     }
 }

@@ -63,6 +63,7 @@ namespace StorageHub
         // Core components
         private ChestRegistry _registry;
         private IStorageProvider _storageProvider;
+        private DriveStorageState _driveStorage;
         private ChestOpenDetector _chestDetector;
         private StorageNetworkResolver _networkResolver;
 
@@ -103,6 +104,8 @@ namespace StorageHub
         private static FieldInfo _playerPositionField;
         private static FieldInfo _playerWidthField;
         private static FieldInfo _playerHeightField;
+        private static FieldInfo _playerSelectedItemField;
+        private static FieldInfo _playerInventoryField;
         private static PropertyInfo _playerNameProp;
         private static FieldInfo _vectorXField;
         private static FieldInfo _vectorYField;
@@ -113,6 +116,7 @@ namespace StorageHub
         private static PropertyInfo _contentSamplesItemsByTypeProperty;
         private static Type _itemType;
         private static MethodInfo _itemSetDefaultsMethod;
+        private static FieldInfo _itemTypeField;
         private static FieldInfo _itemStackField;
         private bool _visualizeInitLogged;
         private bool _visualizeFailureLogged;
@@ -143,6 +147,7 @@ namespace StorageHub
                 context,
                 _log,
                 OnStorageHeartRightClick,
+                OnStorageDriveRightClick,
                 OnStorageAccessRightClick,
                 OnStorageCraftingAccessRightClick);
 
@@ -191,6 +196,8 @@ namespace StorageHub
                     _playerPositionField = playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
                     _playerWidthField = playerType.GetField("width", BindingFlags.Public | BindingFlags.Instance);
                     _playerHeightField = playerType.GetField("height", BindingFlags.Public | BindingFlags.Instance);
+                    _playerSelectedItemField = playerType.GetField("selectedItem", BindingFlags.Public | BindingFlags.Instance);
+                    _playerInventoryField = playerType.GetField("inventory", BindingFlags.Public | BindingFlags.Instance);
                     _playerNameProp = playerType.GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
                 }
 
@@ -215,6 +222,7 @@ namespace StorageHub
 
                     if (_itemType != null)
                     {
+                        _itemTypeField = _itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
                         _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
 
                         foreach (var method in _itemType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
@@ -329,6 +337,8 @@ namespace StorageHub
                 // Initialize config
                 _hubConfig = new StorageHubConfig(_log, _modFolder);
                 _hubConfig.Load(worldName, charName);
+                _driveStorage = new DriveStorageState(_log, _modFolder);
+                _driveStorage.Load(worldName);
 
                 // Initialize registry
                 _registry = new ChestRegistry(_log, _hubConfig);
@@ -339,12 +349,12 @@ namespace StorageHub
                 EnsureDedicatedTileTypesResolved();
 
                 // Initialize storage provider
-                _storageProvider = new SingleplayerProvider(_log, _registry, _hubConfig);
+                _storageProvider = new SingleplayerProvider(_log, _registry, _hubConfig, _driveStorage, _dedicatedBlocksOnly);
 
                 // Initialize chest detector
                 _chestDetector = new ChestOpenDetector(_log, _registry);
                 _chestDetector.Initialize();
-                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, _storageUnitTileType);
+                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, -1);
 
                 EnsureNetworkResolverReady(forceRecreate: true);
 
@@ -376,7 +386,7 @@ namespace StorageHub
                     GetVanillaQuickStackSuppressedTileType,
                     GetVanillaQuickStackSuppressedChestPositions);
 
-                _log.Info($"StorageHub ready - {_registry.Count} registered chests, Tier {_hubConfig.Tier}");
+                _log.Info($"StorageHub ready - {_registry.Count} registered storage nodes, Tier {_hubConfig.Tier}");
 
                 // Dump initial state
                 _debugDumper.DumpState("WORLD_LOAD");
@@ -424,6 +434,7 @@ namespace StorageHub
                 {
                     _registry.SaveToConfig();
                     _hubConfig.Save();
+                    _driveStorage?.Save();
                     _log.Info("StorageHub config saved");
                 }
 
@@ -441,6 +452,7 @@ namespace StorageHub
                 _hubConfig = null;
                 _registry = null;
                 _storageProvider = null;
+                _driveStorage = null;
                 _chestDetector = null;
                 _recipeIndex = null;
                 _craftChecker = null;
@@ -477,6 +489,7 @@ namespace StorageHub
             _hubConfig = null;
             _registry = null;
             _storageProvider = null;
+            _driveStorage = null;
             _chestDetector = null;
             _recipeIndex = null;
             _craftChecker = null;
@@ -491,6 +504,15 @@ namespace StorageHub
         private bool OnStorageHeartRightClick(int tileX, int tileY)
         {
             return OpenDedicatedNetwork(tileX, tileY, preferCraftingTab: false);
+        }
+
+        private bool OnStorageDriveRightClick(int tileX, int tileY)
+        {
+            if (!_enabled)
+                return false;
+
+            GameText.Show("Storage Drive: place storage disks in the 8 drive slots.");
+            return true;
         }
 
         private bool OnStorageAccessRightClick(int tileX, int tileY)
@@ -529,7 +551,7 @@ namespace StorageHub
 
             if (network.UnitCount <= 0)
             {
-                GameText.Show("A Storage Heart needs at least one connected Storage Unit.");
+                GameText.Show("A Storage Heart needs at least one connected Storage Drive.");
                 return false;
             }
 
@@ -538,7 +560,7 @@ namespace StorageHub
             if (preferCraftingTab) _ui.OpenCrafting();
             else _ui.OpenItems();
 
-            _log.Debug($"Opened Storage Hub from network heart ({network.HeartX}, {network.HeartY}) with {network.UnitCount} unit(s)");
+            _log.Debug($"Opened Storage Hub from network heart ({network.HeartX}, {network.HeartY}) with {network.UnitCount} drive(s)");
             return true;
         }
 
@@ -746,7 +768,7 @@ namespace StorageHub
             }
 
             if (_chestDetector != null)
-                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, _storageUnitTileType);
+                _chestDetector.SetDedicatedMode(_dedicatedBlocksOnly, -1);
 
             if (forceRecreate || _networkResolver == null)
             {
@@ -1294,6 +1316,115 @@ namespace StorageHub
                 maxTilesX = Convert.ToInt32(xObj);
                 maxTilesY = Convert.ToInt32(yObj);
                 return maxTilesX > 0 && maxTilesY > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryResolveStorageDriveTopLeft(int tileX, int tileY, out int topX, out int topY)
+        {
+            topX = tileX;
+            topY = tileY;
+
+            try
+            {
+                if (_storageUnitTileType < 0)
+                    EnsureDedicatedTileTypesResolved();
+
+                if (!CustomTileContainers.TryGetTileDefinition(tileX, tileY, out var definition, out int tileType))
+                    return false;
+
+                if (tileType != _storageUnitTileType)
+                    return false;
+
+                if (definition != null && CustomTileContainers.TryGetTopLeft(tileX, tileY, definition, out int resolvedX, out int resolvedY))
+                {
+                    topX = resolvedX;
+                    topY = resolvedY;
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private int GetHeldItemType(object player, out object heldItem)
+        {
+            heldItem = null;
+            if (player == null)
+                return 0;
+
+            try
+            {
+                int selected = GetSafeInt(_playerSelectedItemField, player, 0);
+                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                if (inventory == null || selected < 0 || selected >= inventory.Length)
+                    return 0;
+
+                heldItem = inventory.GetValue(selected);
+                if (heldItem == null)
+                    return 0;
+
+                return GetSafeInt(_itemTypeField, heldItem, 0);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private bool ConsumeHeldItem(object heldItem, int amount)
+        {
+            if (heldItem == null || amount <= 0 || _itemStackField == null)
+                return false;
+
+            try
+            {
+                int stack = GetSafeInt(_itemStackField, heldItem, 0);
+                if (stack < amount)
+                    return false;
+
+                int newStack = stack - amount;
+                if (newStack > 0)
+                {
+                    _itemStackField.SetValue(heldItem, newStack);
+                    return true;
+                }
+
+                if (InvokeItemSetDefaults(heldItem, 0))
+                {
+                    _itemStackField?.SetValue(heldItem, 0);
+                    return true;
+                }
+
+                _itemTypeField?.SetValue(heldItem, 0);
+                _itemStackField?.SetValue(heldItem, 0);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool InvokeItemSetDefaults(object item, int type)
+        {
+            if (item == null || _itemSetDefaultsMethod == null)
+                return false;
+
+            try
+            {
+                int paramCount = _itemSetDefaultsMethod.GetParameters().Length;
+                if (paramCount <= 1)
+                    _itemSetDefaultsMethod.Invoke(item, new object[] { type });
+                else
+                    _itemSetDefaultsMethod.Invoke(item, new object[] { type, null });
+                return true;
             }
             catch
             {

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using StorageHub.Config;
+using StorageHub.DedicatedBlocks;
 using TerrariaModder.Core.Logging;
 
 namespace StorageHub.Storage
@@ -29,6 +30,10 @@ namespace StorageHub.Storage
         private readonly ILogger _log;
         private readonly ChestRegistry _registry;
         private readonly StorageHubConfig _config;
+        private readonly DriveStorageState _driveStorage;
+        private readonly bool _useDriveStorage;
+        private const int MaxDriveDiskSlots = 8;
+        private const int DriveSourceSlotStride = 10_000;
 
         // Reflection cache
         private static Type _mainType;
@@ -97,11 +102,13 @@ namespace StorageHub.Storage
 
         private static bool _reflectionInitialized = false;
 
-        public SingleplayerProvider(ILogger log, ChestRegistry registry, StorageHubConfig config)
+        internal SingleplayerProvider(ILogger log, ChestRegistry registry, StorageHubConfig config, DriveStorageState driveStorage, bool useDriveStorage)
         {
             _log = log;
             _registry = registry;
             _config = config;
+            _driveStorage = driveStorage;
+            _useDriveStorage = useDriveStorage;
 
             if (!_reflectionInitialized)
             {
@@ -243,28 +250,43 @@ namespace StorageHub.Storage
                     _log.Debug($"[Storage] Inventory: {afterInv - beforeInv} items, Banks: {afterBank - afterInv} items");
                 }
 
-                // Get items from registered chests
-                var chests = _chestArrayField?.GetValue(null) as Array;
                 int registeredCount = _registry.Count;
-                int foundChests = 0;
-                int chestItems = 0;
+                int foundContainers = 0;
+                int containerItems = 0;
 
-                if (chests != null)
+                if (_useDriveStorage && _driveStorage != null)
                 {
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests == null)
+                        return items;
+
                     foreach (var pos in _registry.GetRegisteredPositions())
                     {
-                        int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
-                        if (chestIndex >= 0)
+                        foundContainers++;
+                        containerItems += AddDriveItems(chests, pos.x, pos.y, BuildDriveSourceIndex(pos.x, pos.y), items);
+                    }
+                }
+                else
+                {
+                    // Get items from registered chests
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests != null)
+                    {
+                        foreach (var pos in _registry.GetRegisteredPositions())
                         {
-                            foundChests++;
-                            int before = items.Count;
-                            AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
-                            chestItems += items.Count - before;
+                            int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                            if (chestIndex >= 0)
+                            {
+                                foundContainers++;
+                                int before = items.Count;
+                                AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
+                                containerItems += items.Count - before;
+                            }
                         }
                     }
                 }
 
-                _log.Debug($"[Storage] Registry: {registeredCount} chests, Found: {foundChests}, ChestItems: {chestItems}");
+                _log.Debug($"[Storage] Registry: {registeredCount} nodes, Found: {foundContainers}, Items: {containerItems}");
             }
             catch (Exception ex)
             {
@@ -292,11 +314,13 @@ namespace StorageHub.Storage
                     AddBankItems(player, items);
                 }
 
-                // Get items from registered chests within range
-                var chests = _chestArrayField?.GetValue(null) as Array;
-                if (chests != null)
+                // Get items from registered storage nodes within range
+                if (_useDriveStorage && _driveStorage != null)
                 {
-                    // Handle max range (int.MaxValue) - everything is in range
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests == null)
+                        return items;
+
                     bool maxRange = (range == int.MaxValue);
 
                     foreach (var pos in _registry.GetRegisteredPositions())
@@ -320,10 +344,44 @@ namespace StorageHub.Storage
 
                         if (inRange)
                         {
-                            int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
-                            if (chestIndex >= 0)
+                            AddDriveItems(chests, pos.x, pos.y, BuildDriveSourceIndex(pos.x, pos.y), items);
+                        }
+                    }
+                }
+                else
+                {
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests != null)
+                    {
+                        // Handle max range (int.MaxValue) - everything is in range
+                        bool maxRange = (range == int.MaxValue);
+
+                        foreach (var pos in _registry.GetRegisteredPositions())
+                        {
+                            bool inRange = maxRange;
+
+                            if (!maxRange)
                             {
-                                AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
+                                // Convert tile position to world position (1 tile = 16 pixels)
+                                float chestWorldX = pos.x * 16;
+                                float chestWorldY = pos.y * 16;
+
+                                float dx = chestWorldX - playerX;
+                                float dy = chestWorldY - playerY;
+                                float distSq = dx * dx + dy * dy;
+
+                                // Use long to prevent overflow when range is large
+                                long rangeSq = (long)range * range;
+                                inRange = distSq <= rangeSq;
+                            }
+
+                            if (inRange)
+                            {
+                                int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                                if (chestIndex >= 0)
+                                {
+                                    AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
+                                }
                             }
                         }
                     }
@@ -374,6 +432,56 @@ namespace StorageHub.Storage
                     var player = GetLocalPlayer();
                     var bank = _playerBank4Field?.GetValue(player);
                     itemArray = _chestItemField?.GetValue(bank) as Array;
+                }
+                else if (_useDriveStorage && IsDriveSourceIndex(sourceChestIndex))
+                {
+                    if (!TryDecodeDriveSourceIndex(sourceChestIndex, out int driveX, out int driveY))
+                        return false;
+
+                    if (!TryDecodeDriveSourceSlot(sourceSlot, out int diskSlot, out int diskItemSlot))
+                        return false;
+
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (!TryGetDriveDiskSlots(chests, driveX, driveY, out _, out var diskSlots))
+                        return false;
+
+                    int slotLimit = GetDriveDiskSlotLimit(diskSlots);
+                    if (diskSlot < 0 || diskSlot >= slotLimit)
+                        return false;
+
+                    var diskItem = diskSlots.GetValue(diskSlot);
+                    if (!TryGetDiskIdentity(diskItem, assignIfMissing: false, out int diskItemType, out int diskUid))
+                        return false;
+
+                    var disk = _driveStorage.EnsureDisk(diskItemType, diskUid);
+                    if (disk == null || diskItemSlot < 0 || diskItemSlot >= disk.Items.Count)
+                        return false;
+
+                    var existing = disk.Items[diskItemSlot];
+                    int driveActualCount = Math.Min(count, existing.Stack);
+                    if (driveActualCount <= 0)
+                        return false;
+
+                    taken = CreateDriveSnapshot(
+                        existing.ItemId,
+                        driveActualCount,
+                        existing.Prefix,
+                        sourceChestIndex,
+                        sourceSlot);
+
+                    int driveNewStack = existing.Stack - driveActualCount;
+                    if (driveNewStack <= 0)
+                    {
+                        disk.Items.RemoveAt(diskItemSlot);
+                    }
+                    else
+                    {
+                        disk.Items[diskItemSlot] = new DriveItemRecord(existing.ItemId, existing.Prefix, driveNewStack);
+                    }
+
+                    _driveStorage.MarkDirty();
+                    _log.Debug($"Took {driveActualCount}x {taken.Name} from drive source {sourceChestIndex} slot {sourceSlot}");
+                    return true;
                 }
                 else if (sourceChestIndex >= 0)
                 {
@@ -454,6 +562,9 @@ namespace StorageHub.Storage
 
             try
             {
+                if (_useDriveStorage && _driveStorage != null)
+                    return DepositItemToDrives(item, out depositedToChest);
+
                 var chests = _chestArrayField?.GetValue(null) as Array;
                 if (chests == null) return 0;
 
@@ -717,17 +828,63 @@ namespace StorageHub.Storage
 
             try
             {
-                var chests = _chestArrayField?.GetValue(null) as Array;
-                if (chests == null) return result;
-
                 var player = GetLocalPlayer();
                 var playerPos = GetPlayerPosition(player);
 
-                foreach (var pos in _registry.GetRegisteredPositions())
+                if (_useDriveStorage && _driveStorage != null)
                 {
-                    int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
-                    if (chestIndex >= 0)
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+
+                    foreach (var pos in _registry.GetRegisteredPositions())
                     {
+                        float dx = pos.x * 16 - playerPos.x;
+                        float dy = pos.y * 16 - playerPos.y;
+                        float distSq = dx * dx + dy * dy;
+                        int range = ProgressionTier.GetRange(_config.Tier);
+                        long rangeSq = (long)range * range;
+                        bool inRange = distSq <= rangeSq;
+
+                        int diskCount = 0;
+                        int itemCount = 0;
+                        if (TryGetDriveDiskSlots(chests, pos.x, pos.y, out _, out var diskSlots))
+                        {
+                            int slotLimit = GetDriveDiskSlotLimit(diskSlots);
+                            for (int diskSlot = 0; diskSlot < slotLimit; diskSlot++)
+                            {
+                                var diskItem = diskSlots.GetValue(diskSlot);
+                                if (!TryGetDiskIdentity(diskItem, assignIfMissing: true, out int diskItemType, out int diskUid))
+                                    continue;
+
+                                var disk = _driveStorage.EnsureDisk(diskItemType, diskUid);
+                                if (disk == null)
+                                    continue;
+
+                                diskCount++;
+                                for (int i = 0; i < disk.Items.Count; i++)
+                                {
+                                    var entry = disk.Items[i];
+                                    if (entry.ItemId > 0 && entry.Stack > 0)
+                                        itemCount++;
+                                }
+                            }
+                        }
+
+                        string name = $"Storage Drive ({diskCount}/{MaxDriveDiskSlots} disks)";
+                        int sourceIndex = BuildDriveSourceIndex(pos.x, pos.y);
+                        result.Add(new ChestInfo(sourceIndex, pos.x, pos.y, name, inRange, itemCount));
+                    }
+                }
+                else
+                {
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests == null) return result;
+
+                    foreach (var pos in _registry.GetRegisteredPositions())
+                    {
+                        int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                        if (chestIndex < 0)
+                            continue;
+
                         var chest = chests.GetValue(chestIndex);
                         string name = _chestNameField?.GetValue(chest) as string ?? "";
 
@@ -771,6 +928,16 @@ namespace StorageHub.Storage
         {
             try
             {
+                if (_useDriveStorage && IsDriveSourceIndex(chestIndex) &&
+                    TryDecodeDriveSourceIndex(chestIndex, out int driveX, out int driveY))
+                {
+                    float driveDx = driveX * 16 - playerX;
+                    float driveDy = driveY * 16 - playerY;
+                    float driveDistSq = driveDx * driveDx + driveDy * driveDy;
+                    long rangeSqDrive = (long)range * range;
+                    return driveDistSq <= rangeSqDrive;
+                }
+
                 var chests = _chestArrayField?.GetValue(null) as Array;
                 if (chests == null || chestIndex < 0 || chestIndex >= chests.Length)
                     return false;
@@ -1032,12 +1199,20 @@ namespace StorageHub.Storage
                 var inventory = _playerInventoryField?.GetValue(player) as Array;
                 if (inventory == null) return 0;
 
-                var chests = _chestArrayField?.GetValue(null) as Array;
-                if (chests == null) return 0;
-
                 // Match vanilla/Magic Storage semantics: quick stack only into item types
                 // that already exist in storage.
-                var existingTypes = GetExistingStorageItemTypes(chests, _registry.GetRegisteredPositions());
+                HashSet<int> existingTypes;
+                if (_useDriveStorage && _driveStorage != null)
+                {
+                    existingTypes = GetExistingDriveItemTypes(_registry.GetRegisteredPositions());
+                }
+                else
+                {
+                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    if (chests == null) return 0;
+                    existingTypes = GetExistingStorageItemTypes(chests, _registry.GetRegisteredPositions());
+                }
+
                 if (existingTypes.Count == 0) return 0;
 
                 int start = includeHotbar ? 0 : 10;
@@ -1209,6 +1384,348 @@ namespace StorageHub.Storage
             }
 
             return types;
+        }
+
+        private readonly struct DriveDiskRef
+        {
+            public readonly int SourceIndex;
+            public readonly DiskRecord Disk;
+
+            public DriveDiskRef(int sourceIndex, DiskRecord disk)
+            {
+                SourceIndex = sourceIndex;
+                Disk = disk;
+            }
+        }
+
+        private HashSet<int> GetExistingDriveItemTypes(IEnumerable<(int x, int y)> positions)
+        {
+            var types = new HashSet<int>();
+            if (_driveStorage == null || positions == null)
+                return types;
+
+            var chests = _chestArrayField?.GetValue(null) as Array;
+            if (chests == null)
+                return types;
+
+            foreach (var pos in positions)
+            {
+                if (!TryGetDriveDiskSlots(chests, pos.x, pos.y, out _, out var diskSlots))
+                    continue;
+
+                int slotLimit = GetDriveDiskSlotLimit(diskSlots);
+                for (int diskSlot = 0; diskSlot < slotLimit; diskSlot++)
+                {
+                    var diskItem = diskSlots.GetValue(diskSlot);
+                    if (!TryGetDiskIdentity(diskItem, assignIfMissing: true, out int diskItemType, out int diskUid))
+                        continue;
+
+                    var disk = _driveStorage.EnsureDisk(diskItemType, diskUid);
+                    if (disk == null)
+                        continue;
+
+                    for (int i = 0; i < disk.Items.Count; i++)
+                    {
+                        var entry = disk.Items[i];
+                        if (entry.ItemId > 0 && entry.Stack > 0)
+                            types.Add(entry.ItemId);
+                    }
+                }
+            }
+
+            return types;
+        }
+
+        private int DepositItemToDrives(ItemSnapshot item, out int depositedToChest)
+        {
+            depositedToChest = -1;
+
+            if (_driveStorage == null || item.ItemId <= 0 || item.Stack <= 0)
+                return 0;
+
+            var chests = _chestArrayField?.GetValue(null) as Array;
+            if (chests == null)
+                return 0;
+
+            int remaining = item.Stack;
+            int maxStack = item.MaxStack > 0 ? item.MaxStack : GetItemMaxStack(item.ItemId);
+            if (maxStack <= 0)
+                maxStack = 9999;
+
+            var disks = new List<DriveDiskRef>();
+            foreach (var pos in _registry.GetRegisteredPositions())
+            {
+                if (!TryGetDriveDiskSlots(chests, pos.x, pos.y, out _, out var diskSlots))
+                    continue;
+
+                int sourceIndex = BuildDriveSourceIndex(pos.x, pos.y);
+                int slotLimit = GetDriveDiskSlotLimit(diskSlots);
+                for (int diskSlot = 0; diskSlot < slotLimit; diskSlot++)
+                {
+                    var diskItem = diskSlots.GetValue(diskSlot);
+                    if (!TryGetDiskIdentity(diskItem, assignIfMissing: true, out int diskItemType, out int diskUid))
+                        continue;
+
+                    var disk = _driveStorage.EnsureDisk(diskItemType, diskUid);
+                    if (disk == null || disk.Capacity <= 0)
+                        continue;
+
+                    disks.Add(new DriveDiskRef(sourceIndex, disk));
+                }
+            }
+
+            if (disks.Count == 0)
+                return 0;
+
+            // First pass: stack into existing matching entries.
+            for (int d = 0; d < disks.Count && remaining > 0; d++)
+            {
+                var diskRef = disks[d];
+                var disk = diskRef.Disk;
+                for (int i = 0; i < disk.Items.Count && remaining > 0; i++)
+                {
+                    var existing = disk.Items[i];
+                    if (existing.ItemId != item.ItemId || existing.Prefix != item.Prefix)
+                        continue;
+                    if (existing.Stack >= maxStack)
+                        continue;
+
+                    int canAdd = maxStack - existing.Stack;
+                    int toAdd = Math.Min(canAdd, remaining);
+                    disk.Items[i] = new DriveItemRecord(existing.ItemId, existing.Prefix, existing.Stack + toAdd);
+                    remaining -= toAdd;
+                    depositedToChest = diskRef.SourceIndex;
+                }
+            }
+
+            // Second pass: fill empty stack slots on disks.
+            for (int d = 0; d < disks.Count && remaining > 0; d++)
+            {
+                var diskRef = disks[d];
+                var disk = diskRef.Disk;
+                while (remaining > 0 && disk.Items.Count < disk.Capacity)
+                {
+                    int toAdd = Math.Min(maxStack, remaining);
+                    disk.Items.Add(new DriveItemRecord(item.ItemId, item.Prefix, toAdd));
+                    remaining -= toAdd;
+                    depositedToChest = diskRef.SourceIndex;
+                }
+            }
+
+            int deposited = item.Stack - remaining;
+            if (deposited > 0)
+                _driveStorage.MarkDirty();
+
+            if (deposited <= 0)
+                _log.Warn($"No drive space to deposit {item.Name}");
+            else if (remaining > 0)
+                _log.Warn($"Partial drive deposit: {deposited}x {item.Name} stored, {remaining}x remaining");
+
+            return deposited;
+        }
+
+        private int AddDriveItems(Array chests, int driveX, int driveY, int sourceIndex, List<ItemSnapshot> items)
+        {
+            if (items == null || _driveStorage == null)
+                return 0;
+
+            if (!TryGetDriveDiskSlots(chests, driveX, driveY, out _, out var diskSlots))
+                return 0;
+
+            int added = 0;
+            int slotLimit = GetDriveDiskSlotLimit(diskSlots);
+            for (int diskSlot = 0; diskSlot < slotLimit; diskSlot++)
+            {
+                var diskItem = diskSlots.GetValue(diskSlot);
+                if (!TryGetDiskIdentity(diskItem, assignIfMissing: true, out int diskItemType, out int diskUid))
+                    continue;
+
+                var disk = _driveStorage.EnsureDisk(diskItemType, diskUid);
+                if (disk == null || disk.Capacity <= 0)
+                    continue;
+
+                int entryLimit = disk.Items.Count;
+                for (int itemIndex = 0; itemIndex < entryLimit; itemIndex++)
+                {
+                    var entry = disk.Items[itemIndex];
+                    if (entry.ItemId <= 0 || entry.Stack <= 0)
+                        continue;
+
+                    int encodedSourceSlot = EncodeDriveSourceSlot(diskSlot, itemIndex);
+                    var snapshot = CreateDriveSnapshot(entry.ItemId, entry.Stack, entry.Prefix, sourceIndex, encodedSourceSlot);
+                    if (snapshot.IsEmpty)
+                        continue;
+
+                    items.Add(snapshot);
+                    added++;
+                }
+            }
+
+            return added;
+        }
+
+        private ItemSnapshot CreateDriveSnapshot(int itemId, int stack, int prefix, int sourceChestIndex, int sourceSlot)
+        {
+            try
+            {
+                if (_itemType == null || _itemStackField == null)
+                {
+                    return new ItemSnapshot(itemId, stack, prefix, $"Item {itemId}", 9999, 0, sourceChestIndex, sourceSlot);
+                }
+
+                object item = Activator.CreateInstance(_itemType);
+                if (item == null || !InvokeSetDefaults(item, itemId))
+                    return new ItemSnapshot(itemId, stack, prefix, $"Item {itemId}", 9999, 0, sourceChestIndex, sourceSlot);
+
+                _itemStackField.SetValue(item, stack);
+                ApplyPrefix(item, prefix);
+
+                var snapshot = CreateSnapshot(item, sourceChestIndex, sourceSlot);
+                if (!snapshot.IsEmpty)
+                    return snapshot;
+            }
+            catch
+            {
+                // Fallback below.
+            }
+
+            return new ItemSnapshot(itemId, stack, prefix, $"Item {itemId}", 9999, 0, sourceChestIndex, sourceSlot);
+        }
+
+        private int GetItemMaxStack(int itemId)
+        {
+            try
+            {
+                if (itemId <= 0 || _itemType == null || _itemMaxStackField == null)
+                    return 9999;
+
+                object item = Activator.CreateInstance(_itemType);
+                if (item == null || !InvokeSetDefaults(item, itemId))
+                    return 9999;
+
+                return GetSafeInt(_itemMaxStackField, item, 9999);
+            }
+            catch
+            {
+                return 9999;
+            }
+        }
+
+        private bool IsDriveSourceIndex(int sourceIndex)
+        {
+            return SourceIndex.IsStorageDrive(sourceIndex);
+        }
+
+        private int BuildDriveSourceIndex(int x, int y)
+        {
+            return SourceIndex.BuildStorageDriveIndex(x, y);
+        }
+
+        private bool TryDecodeDriveSourceIndex(int sourceIndex, out int x, out int y)
+        {
+            return SourceIndex.TryDecodeStorageDriveIndex(sourceIndex, out x, out y);
+        }
+
+        private static int EncodeDriveSourceSlot(int diskSlot, int diskItemSlot)
+        {
+            return diskSlot * DriveSourceSlotStride + diskItemSlot;
+        }
+
+        private static bool TryDecodeDriveSourceSlot(int sourceSlot, out int diskSlot, out int diskItemSlot)
+        {
+            diskSlot = 0;
+            diskItemSlot = 0;
+
+            if (sourceSlot < 0)
+                return false;
+
+            diskSlot = sourceSlot / DriveSourceSlotStride;
+            diskItemSlot = sourceSlot % DriveSourceSlotStride;
+            return diskSlot >= 0 && diskItemSlot >= 0;
+        }
+
+        private bool TryGetDriveDiskSlots(Array chests, int driveX, int driveY, out int chestIndex, out Array diskSlots)
+        {
+            chestIndex = -1;
+            diskSlots = null;
+
+            if (chests == null)
+                return false;
+
+            chestIndex = FindChestAtPosition(chests, driveX, driveY);
+            if (chestIndex < 0 || chestIndex >= chests.Length)
+                return false;
+
+            var chest = chests.GetValue(chestIndex);
+            if (chest == null)
+                return false;
+
+            diskSlots = _chestItemField?.GetValue(chest) as Array;
+            return diskSlots != null;
+        }
+
+        private static int GetDriveDiskSlotLimit(Array diskSlots)
+        {
+            if (diskSlots == null)
+                return 0;
+
+            return Math.Min(MaxDriveDiskSlots, diskSlots.Length);
+        }
+
+        private bool TryGetDiskIdentity(object diskItem, bool assignIfMissing, out int diskItemType, out int diskUid)
+        {
+            diskItemType = 0;
+            diskUid = 0;
+
+            if (diskItem == null || _itemTypeField == null || _itemStackField == null || _itemPrefixField == null)
+                return false;
+
+            diskItemType = GetSafeInt(_itemTypeField, diskItem, 0);
+            int stack = GetSafeInt(_itemStackField, diskItem, 0);
+            if (diskItemType <= 0 || stack <= 0)
+                return false;
+
+            if (!DedicatedBlocksManager.TryGetDiskTierForItemType(diskItemType, out _))
+                return false;
+
+            diskUid = GetSafeInt(_itemPrefixField, diskItem, 0);
+            if (diskUid > 0)
+                return true;
+
+            if (!assignIfMissing || _driveStorage == null)
+                return false;
+
+            int allocatedUid = _driveStorage.AllocateDiskUid(diskItemType);
+            if (allocatedUid <= 0)
+            {
+                _log.Warn($"No free disk UIDs available for disk item type {diskItemType}");
+                return false;
+            }
+
+            SetItemPrefix(diskItem, allocatedUid);
+            _driveStorage.EnsureDisk(diskItemType, allocatedUid);
+            _driveStorage.MarkDirty();
+            diskUid = allocatedUid;
+            return true;
+        }
+
+        private void SetItemPrefix(object item, int prefix)
+        {
+            if (item == null || _itemPrefixField == null)
+                return;
+
+            int clamped = Math.Max(0, Math.Min(byte.MaxValue, prefix));
+            try
+            {
+                if (_itemPrefixField.FieldType == typeof(byte))
+                    _itemPrefixField.SetValue(item, (byte)clamped);
+                else
+                    _itemPrefixField.SetValue(item, clamped);
+            }
+            catch
+            {
+                // Best effort only.
+            }
         }
 
         private object GetLocalPlayer()

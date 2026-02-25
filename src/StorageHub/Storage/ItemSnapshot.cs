@@ -219,12 +219,44 @@ namespace StorageHub.Storage
         public const int Safe = -3;
         public const int DefendersForge = -4;
         public const int VoidVault = -5;
+        public const int StorageDriveBase = 1_000_000;
+        public const int StorageDriveYStride = 10_000;
+
+        public static bool IsStorageDrive(int sourceIndex)
+        {
+            return sourceIndex >= StorageDriveBase;
+        }
+
+        public static int BuildStorageDriveIndex(int x, int y)
+        {
+            return StorageDriveBase + (x * StorageDriveYStride) + y;
+        }
+
+        public static bool TryDecodeStorageDriveIndex(int sourceIndex, out int x, out int y)
+        {
+            x = 0;
+            y = 0;
+
+            if (!IsStorageDrive(sourceIndex))
+                return false;
+
+            int encoded = sourceIndex - StorageDriveBase;
+            if (encoded < 0)
+                return false;
+
+            x = encoded / StorageDriveYStride;
+            y = encoded % StorageDriveYStride;
+            return x >= 0 && y >= 0;
+        }
 
         /// <summary>
         /// Get display name for a source index.
         /// </summary>
         public static string GetSourceName(int sourceIndex)
         {
+            if (TryDecodeStorageDriveIndex(sourceIndex, out int driveX, out int driveY))
+                return $"Storage Drive ({driveX}, {driveY})";
+
             return sourceIndex switch
             {
                 PlayerInventory => "Inventory",
