@@ -174,6 +174,7 @@ namespace StorageHub
             InventoryQuickDepositPatch.Initialize(_log);
             VanillaQuickStackPatch.Initialize(_log);
             DriveVisualPatch.Initialize(_log);
+            DiskPrefixPatch.Initialize(_log);
 
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
@@ -516,6 +517,7 @@ namespace StorageHub
             InventoryQuickDepositPatch.Unload();
             VanillaQuickStackPatch.Unload();
             DriveVisualPatch.Unload();
+            DiskPrefixPatch.Unload();
 
             _hubConfig = null;
             _registry = null;
@@ -662,8 +664,6 @@ namespace StorageHub
                 if (HasDiskInUpgraderSlot())
                 {
                     UIRenderer.DrawItem(_upgraderSlotItemType, slotX + 5, slotY + 5, slotSize - 10, slotSize - 10);
-                    if (slotHover)
-                        ItemTooltip.Set(_upgraderSlotItemType, _upgraderSlotPrefix, _upgraderSlotStack, $"Disk UID: {_upgraderSlotPrefix}");
                 }
                 else
                 {
@@ -779,8 +779,6 @@ namespace StorageHub
                     if (WidgetInput.ScrollWheel != 0)
                         WidgetInput.ConsumeScroll();
                 }
-
-                ItemTooltip.DrawDeferred();
             }
             catch (Exception ex)
             {
