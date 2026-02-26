@@ -227,3 +227,15 @@ Requires TerrariaModder Core.
 
 Extract this zip into your Terraria folder. The mod goes into
 `TerrariaModder/mods/storage-hub/`.
+
+## Dedicated Docs Site
+
+Storage Hub now has a standalone MkDocs config under:
+
+- `src/StorageHub/mkdocs.yml`
+
+Serve locally from repo root:
+
+```powershell
+mkdocs serve -f src/StorageHub/mkdocs.yml
+```
