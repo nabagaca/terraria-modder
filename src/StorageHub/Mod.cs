@@ -154,6 +154,7 @@ namespace StorageHub
             // Shift-click quick-deposit from inventory while Storage Hub is open
             InventoryQuickDepositPatch.Initialize(_log);
             VanillaQuickStackPatch.Initialize(_log);
+            DriveVisualPatch.Initialize(_log);
 
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
@@ -339,6 +340,7 @@ namespace StorageHub
                 _hubConfig.Load(worldName, charName);
                 _driveStorage = new DriveStorageState(_log, _modFolder);
                 _driveStorage.Load(worldName);
+                DriveVisualPatch.SetStateProvider(() => _driveStorage);
 
                 // Initialize registry
                 _registry = new ChestRegistry(_log, _hubConfig);
@@ -445,6 +447,7 @@ namespace StorageHub
                 _debugDumper?.WriteSessionSummary();
                 InventoryQuickDepositPatch.ClearCallbacks();
                 VanillaQuickStackPatch.ClearCallback();
+                DriveVisualPatch.ClearStateProvider();
 
                 // Clear singleton and null out references to prevent stale polling between worlds
                 ChestRegistry.ClearInstance();
@@ -485,6 +488,7 @@ namespace StorageHub
             _ui = null;
             InventoryQuickDepositPatch.Unload();
             VanillaQuickStackPatch.Unload();
+            DriveVisualPatch.Unload();
 
             _hubConfig = null;
             _registry = null;
