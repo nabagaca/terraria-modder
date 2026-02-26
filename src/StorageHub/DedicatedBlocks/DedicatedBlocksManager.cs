@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using StorageHub.Storage;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Assets;
@@ -433,6 +434,70 @@ namespace StorageHub.DedicatedBlocks
                 AutoReuse = true,
                 Rarity = 3,
                 Value = 30000
+            });
+
+            // Starter placeholder recipes.
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemHeartId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["Diamond"] = 1,
+                    ["IronBar"] = 4,
+                    ["Wood"] = 10
+                },
+                Station = "Anvils"
+            });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemHeartId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["Diamond"] = 1,
+                    ["LeadBar"] = 4,
+                    ["Wood"] = 10
+                },
+                Station = "Anvils"
+            });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemDiskBasicId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["Diamond"] = 1,
+                    ["Ruby"] = 1,
+                    ["GoldBar"] = 1
+                },
+                Station = "Anvils"
+            });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemUnitId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["GoldBar"] = 5,
+                    ["IronBar"] = 5
+                },
+                Station = "Anvils"
+            });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemUnitId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["GoldBar"] = 5,
+                    ["LeadBar"] = 5
+                },
+                Station = "Anvils"
             });
         }
 
