@@ -250,7 +250,7 @@ namespace StorageHub.DedicatedBlocks
             context.RegisterTile("disk-upgrader", new TileDefinition
             {
                 DisplayName = "Disk Upgrader",
-                Texture = "assets/tiles/storage-crafting-access.png",
+                Texture = "assets/tiles/disk-upgrader.png",
                 Width = 2,
                 Height = 2,
                 OriginX = 1,
@@ -440,7 +440,7 @@ namespace StorageHub.DedicatedBlocks
             {
                 DisplayName = "Disk Upgrader",
                 Tooltip = new[] { "Open the upgrader UI to upgrade storage disks while keeping contents" },
-                Texture = "assets/items/storage-crafting-access.png",
+                Texture = "assets/items/disk-upgrader.png",
                 CreateTileId = TileDiskUpgraderId,
                 PlaceStyle = 0,
                 Width = 24,
