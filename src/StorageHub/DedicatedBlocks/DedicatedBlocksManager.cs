@@ -18,6 +18,7 @@ namespace StorageHub.DedicatedBlocks
         public const string TileUnitId = "storage-hub:storage-unit";
         public const string TileAccessId = "storage-hub:storage-access";
         public const string TileCraftingAccessId = "storage-hub:storage-crafting-access";
+        public const string TileDiskUpgraderId = "storage-hub:disk-upgrader";
 
         public const string ItemComponentId = "storage-hub:storage-component-item";
         public const string ItemConnectorId = "storage-hub:storage-connector-item";
@@ -25,6 +26,7 @@ namespace StorageHub.DedicatedBlocks
         public const string ItemUnitId = "storage-hub:storage-unit-item";
         public const string ItemAccessId = "storage-hub:storage-access-item";
         public const string ItemCraftingAccessId = "storage-hub:storage-crafting-access-item";
+        public const string ItemDiskUpgraderId = "storage-hub:disk-upgrader-item";
         public const string ItemDiskBasicId = "storage-hub:storage-disk-basic-item";
         public const string ItemDiskImprovedId = "storage-hub:storage-disk-improved-item";
         public const string ItemDiskAdvancedId = "storage-hub:storage-disk-advanced-item";
@@ -42,7 +44,8 @@ namespace StorageHub.DedicatedBlocks
             Func<int, int, bool> onStorageHeartRightClick,
             Func<int, int, bool> onStorageDriveRightClick,
             Func<int, int, bool> onStorageAccessRightClick,
-            Func<int, int, bool> onStorageCraftingAccessRightClick)
+            Func<int, int, bool> onStorageCraftingAccessRightClick,
+            Func<int, int, bool> onDiskUpgraderRightClick)
         {
             if (context == null) return;
 
@@ -244,6 +247,43 @@ namespace StorageHub.DedicatedBlocks
                 }
             });
 
+            context.RegisterTile("disk-upgrader", new TileDefinition
+            {
+                DisplayName = "Disk Upgrader",
+                Texture = "assets/tiles/storage-crafting-access.png",
+                Width = 2,
+                Height = 2,
+                OriginX = 1,
+                OriginY = 1,
+                CoordinateHeights = new[] { 16, 16 },
+                CoordinateWidth = 16,
+                CoordinatePadding = 2,
+                FrameImportant = true,
+                NoAttach = false,
+                Solid = false,
+                SolidTop = true,
+                Table = true,
+                Lighted = true,
+                LavaDeath = true,
+                HitSoundStyle = 1,
+                MapColorR = 200,
+                MapColorG = 170,
+                MapColorB = 90,
+                DropItemId = ItemDiskUpgraderId,
+                OnRightClick = (x, y, player) =>
+                {
+                    try
+                    {
+                        return onDiskUpgraderRightClick?.Invoke(x, y) ?? false;
+                    }
+                    catch (Exception ex)
+                    {
+                        log?.Error($"Disk upgrader right-click error: {ex.Message}");
+                        return false;
+                    }
+                }
+            });
+
             context.RegisterItem("storage-component-item", new ItemDefinition
             {
                 DisplayName = "Storage Component",
@@ -396,6 +436,26 @@ namespace StorageHub.DedicatedBlocks
                 Value = 30000
             });
 
+            context.RegisterItem("disk-upgrader-item", new ItemDefinition
+            {
+                DisplayName = "Disk Upgrader",
+                Tooltip = new[] { "Open the upgrader UI to upgrade storage disks while keeping contents" },
+                Texture = "assets/items/storage-crafting-access.png",
+                CreateTileId = TileDiskUpgraderId,
+                PlaceStyle = 0,
+                Width = 24,
+                Height = 24,
+                MaxStack = 99,
+                Consumable = true,
+                UseStyle = 1,
+                UseTurn = true,
+                UseTime = 10,
+                UseAnimation = 15,
+                AutoReuse = true,
+                Rarity = 2,
+                Value = 15000
+            });
+
             context.RegisterItem("storage-access-item", new ItemDefinition
             {
                 DisplayName = "Storage Access",
@@ -499,6 +559,30 @@ namespace StorageHub.DedicatedBlocks
                 },
                 Station = "Anvils"
             });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemDiskUpgraderId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["GoldBar"] = 5,
+                    ["IronBar"] = 10
+                },
+                Station = "Anvils"
+            });
+
+            context.RegisterRecipe(new RecipeDefinition
+            {
+                Result = ItemDiskUpgraderId,
+                ResultStack = 1,
+                Ingredients = new Dictionary<string, int>
+                {
+                    ["GoldBar"] = 5,
+                    ["LeadBar"] = 10
+                },
+                Station = "Anvils"
+            });
         }
 
         public static int ResolveStorageComponentTileType()
@@ -524,6 +608,11 @@ namespace StorageHub.DedicatedBlocks
         public static int ResolveStorageCraftingAccessTileType()
         {
             return AssetSystem.GetTileRuntimeType(TileCraftingAccessId);
+        }
+
+        public static int ResolveDiskUpgraderTileType()
+        {
+            return AssetSystem.GetTileRuntimeType(TileDiskUpgraderId);
         }
 
         public static int ResolveStorageUnitTileType()

@@ -8,7 +8,9 @@ using TerrariaModder.Core.Assets;
 using TerrariaModder.Core.Config;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Logging;
+using TerrariaModder.Core.Input;
 using TerrariaModder.Core.UI;
+using TerrariaModder.Core.UI.Widgets;
 using StorageHub.Config;
 using StorageHub.Storage;
 using StorageHub.Patches;
@@ -84,6 +86,21 @@ namespace StorageHub
         public static DebugDumper Dumper { get; private set; }
 
         private const int NearbyQuickStackScanRadiusTiles = 39;
+        private const string DiskUpgraderPanelId = "storage-hub-disk-upgrader";
+        private const int DiskUpgraderPanelWidth = 460;
+        private const int DiskUpgraderPanelHeight = 260;
+        private const int DiskUpgraderHeaderHeight = 35;
+
+        // Disk upgrader UI state
+        private bool _diskUpgraderOpen;
+        private int _diskUpgraderPanelX = -1;
+        private int _diskUpgraderPanelY = -1;
+        private bool _diskUpgraderDragging;
+        private int _diskUpgraderDragOffsetX;
+        private int _diskUpgraderDragOffsetY;
+        private int _upgraderSlotItemType;
+        private int _upgraderSlotPrefix;
+        private int _upgraderSlotStack;
 
         // Dedicated tile runtime IDs
         private int _storageHeartTileType = -1;
@@ -104,7 +121,6 @@ namespace StorageHub
         private static FieldInfo _playerPositionField;
         private static FieldInfo _playerWidthField;
         private static FieldInfo _playerHeightField;
-        private static FieldInfo _playerSelectedItemField;
         private static FieldInfo _playerInventoryField;
         private static PropertyInfo _playerNameProp;
         private static FieldInfo _vectorXField;
@@ -118,6 +134,8 @@ namespace StorageHub
         private static MethodInfo _itemSetDefaultsMethod;
         private static FieldInfo _itemTypeField;
         private static FieldInfo _itemStackField;
+        private static FieldInfo _itemPrefixField;
+        private static FieldInfo _mouseItemField;
         private bool _visualizeInitLogged;
         private bool _visualizeFailureLogged;
         private bool _visualizeUnavailableLogged;
@@ -149,7 +167,8 @@ namespace StorageHub
                 OnStorageHeartRightClick,
                 OnStorageDriveRightClick,
                 OnStorageAccessRightClick,
-                OnStorageCraftingAccessRightClick);
+                OnStorageCraftingAccessRightClick,
+                OnDiskUpgraderRightClick);
 
             // Shift-click quick-deposit from inventory while Storage Hub is open
             InventoryQuickDepositPatch.Initialize(_log);
@@ -159,6 +178,7 @@ namespace StorageHub
             // Subscribe to frame events (world load/unload handled via IMod interface)
             FrameEvents.OnPreUpdate += OnUpdate;
             UIRenderer.RegisterPanelDraw("storage-hub", OnDraw);
+            UIRenderer.RegisterPanelDraw(DiskUpgraderPanelId, OnDrawDiskUpgraderUi);
 
             _dedicatedBlocksOnly = _context.Config.Get("dedicatedBlocksOnly", true);
 
@@ -186,6 +206,7 @@ namespace StorageHub
                     _maxTilesYField = _mainType.GetField("maxTilesY", BindingFlags.Public | BindingFlags.Static);
                     _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
                     _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
+                    _mouseItemField = _mainType.GetField("mouseItem", BindingFlags.Public | BindingFlags.Static);
                 }
 
                 var playerType = Type.GetType("Terraria.Player, Terraria")
@@ -197,7 +218,6 @@ namespace StorageHub
                     _playerPositionField = playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
                     _playerWidthField = playerType.GetField("width", BindingFlags.Public | BindingFlags.Instance);
                     _playerHeightField = playerType.GetField("height", BindingFlags.Public | BindingFlags.Instance);
-                    _playerSelectedItemField = playerType.GetField("selectedItem", BindingFlags.Public | BindingFlags.Instance);
                     _playerInventoryField = playerType.GetField("inventory", BindingFlags.Public | BindingFlags.Instance);
                     _playerNameProp = playerType.GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
                 }
@@ -225,6 +245,7 @@ namespace StorageHub
                     {
                         _itemTypeField = _itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
                         _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
+                        _itemPrefixField = _itemType.GetField("prefix", BindingFlags.Public | BindingFlags.Instance);
 
                         foreach (var method in _itemType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
                         {
@@ -430,6 +451,7 @@ namespace StorageHub
             {
                 // Close UI
                 _ui?.Close();
+                CloseDiskUpgraderUi(forceClose: true);
 
                 // Save config
                 if (_registry != null && _hubConfig != null)
@@ -471,6 +493,9 @@ namespace StorageHub
                 _storageConnectorTileType = -1;
                 _storageAccessTileType = -1;
                 _storageCraftingAccessTileType = -1;
+                _upgraderSlotItemType = 0;
+                _upgraderSlotPrefix = 0;
+                _upgraderSlotStack = 0;
             }
             catch (Exception ex)
             {
@@ -482,9 +507,11 @@ namespace StorageHub
         {
             FrameEvents.OnPreUpdate -= OnUpdate;
             UIRenderer.UnregisterPanelDraw("storage-hub");
+            UIRenderer.UnregisterPanelDraw(DiskUpgraderPanelId);
 
             // Clean up UI
             _ui?.Close();
+            CloseDiskUpgraderUi(forceClose: true);
             _ui = null;
             InventoryQuickDepositPatch.Unload();
             VanillaQuickStackPatch.Unload();
@@ -527,6 +554,611 @@ namespace StorageHub
         private bool OnStorageCraftingAccessRightClick(int tileX, int tileY)
         {
             return OpenDedicatedNetwork(tileX, tileY, preferCraftingTab: true);
+        }
+
+        private bool OnDiskUpgraderRightClick(int tileX, int tileY)
+        {
+            if (!_enabled)
+                return false;
+
+            if (_driveStorage == null)
+            {
+                GameText.Show("Disk storage is not ready yet.");
+                return true;
+            }
+
+            OpenDiskUpgraderUi(tileX, tileY);
+            return true;
+        }
+
+        private void OpenDiskUpgraderUi(int tileX, int tileY)
+        {
+            EnsureDedicatedTileTypesResolved();
+            _diskUpgraderOpen = true;
+            UIRenderer.OpenInventory();
+            UIRenderer.BringToFront(DiskUpgraderPanelId);
+        }
+
+        private void CloseDiskUpgraderUi(bool forceClose)
+        {
+            if (!_diskUpgraderOpen)
+                return;
+
+            if (forceClose)
+                TryReturnUpgraderSlotItemToPlayer(showMessageOnFailure: false);
+            else if (!TryReturnUpgraderSlotItemToPlayer(showMessageOnFailure: true))
+                return;
+
+            if (forceClose && HasDiskInUpgraderSlot())
+            {
+                _log.Warn("Disk Upgrader UI closed with an item still in slot; clearing transient slot state.");
+                ClearUpgraderSlot();
+            }
+
+            _diskUpgraderOpen = false;
+            _diskUpgraderDragging = false;
+            UIRenderer.UnregisterPanelBounds(DiskUpgraderPanelId);
+            WidgetInput.BlockInput = false;
+
+            if ((_ui == null || !_ui.IsOpen) && !forceClose)
+                UIRenderer.CloseInventory();
+        }
+
+        private void OnDrawDiskUpgraderUi()
+        {
+            if (!_enabled || !_diskUpgraderOpen)
+                return;
+
+            bool blockInput = WidgetInput.ShouldBlockForHigherPriorityPanel(DiskUpgraderPanelId);
+            WidgetInput.BlockInput = blockInput;
+
+            try
+            {
+                if (!blockInput && InputState.IsKeyJustPressed(KeyCode.Escape))
+                {
+                    CloseDiskUpgraderUi(forceClose: false);
+                    return;
+                }
+
+                if (_diskUpgraderPanelX < 0)
+                    _diskUpgraderPanelX = (UIRenderer.ScreenWidth - DiskUpgraderPanelWidth) / 2;
+                if (_diskUpgraderPanelY < 0)
+                    _diskUpgraderPanelY = (UIRenderer.ScreenHeight - DiskUpgraderPanelHeight) / 2;
+
+                HandleDiskUpgraderDragging(blockInput);
+
+                _diskUpgraderPanelX = Math.Max(0, Math.Min(_diskUpgraderPanelX, UIRenderer.ScreenWidth - DiskUpgraderPanelWidth));
+                _diskUpgraderPanelY = Math.Max(0, Math.Min(_diskUpgraderPanelY, UIRenderer.ScreenHeight - DiskUpgraderPanelHeight));
+
+                int x = _diskUpgraderPanelX;
+                int y = _diskUpgraderPanelY;
+                UIRenderer.RegisterPanelBounds(DiskUpgraderPanelId, x, y, DiskUpgraderPanelWidth, DiskUpgraderPanelHeight);
+
+                UIRenderer.DrawPanel(x, y, DiskUpgraderPanelWidth, DiskUpgraderPanelHeight, UIColors.PanelBg);
+                UIRenderer.DrawRect(x, y, DiskUpgraderPanelWidth, DiskUpgraderHeaderHeight, UIColors.HeaderBg);
+                UIRenderer.DrawTextShadow("Disk Upgrader", x + 12, y + 9, UIColors.TextTitle);
+
+                int closeX = x + DiskUpgraderPanelWidth - 35;
+                bool closeHover = WidgetInput.IsMouseOver(closeX, y + 3, 30, 30) && !blockInput;
+                UIRenderer.DrawRect(closeX, y + 3, 30, 30, closeHover ? UIColors.CloseBtnHover : UIColors.CloseBtn);
+                UIRenderer.DrawText("X", closeX + 11, y + 10, UIColors.Text);
+                if (closeHover && WidgetInput.MouseLeftClick)
+                {
+                    WidgetInput.ConsumeClick();
+                    CloseDiskUpgraderUi(forceClose: false);
+                    return;
+                }
+
+                // Slot section
+                int slotX = x + 26;
+                int slotY = y + 70;
+                const int slotSize = 62;
+
+                UIRenderer.DrawText("Disk Slot", slotX, slotY - 20, UIColors.TextDim);
+                bool slotHover = WidgetInput.IsMouseOver(slotX, slotY, slotSize, slotSize) && !blockInput;
+                UIRenderer.DrawRect(slotX, slotY, slotSize, slotSize, slotHover ? UIColors.ItemHoverBg : UIColors.ItemBg);
+                UIRenderer.DrawRectOutline(slotX, slotY, slotSize, slotSize, UIColors.Divider, 1);
+
+                if (HasDiskInUpgraderSlot())
+                {
+                    UIRenderer.DrawItem(_upgraderSlotItemType, slotX + 5, slotY + 5, slotSize - 10, slotSize - 10);
+                    if (slotHover)
+                        ItemTooltip.Set(_upgraderSlotItemType, _upgraderSlotPrefix, _upgraderSlotStack, $"Disk UID: {_upgraderSlotPrefix}");
+                }
+                else
+                {
+                    UIRenderer.DrawText("Place", slotX + 11, slotY + 17, UIColors.TextHint);
+                    UIRenderer.DrawText("Disk", slotX + 13, slotY + 33, UIColors.TextHint);
+                }
+
+                if (slotHover)
+                {
+                    if (WidgetInput.MouseLeftClick)
+                    {
+                        HandleDiskUpgraderSlotClick();
+                        WidgetInput.ConsumeClick();
+                    }
+                    else if (WidgetInput.MouseRightClick)
+                    {
+                        HandleDiskUpgraderSlotClick();
+                        WidgetInput.ConsumeRightClick();
+                    }
+                }
+
+                var player = GetLocalPlayer();
+                Array inventory = _playerInventoryField?.GetValue(player) as Array;
+
+                // Status + costs
+                int textX = slotX + slotSize + 24;
+                int textY = slotY - 2;
+                bool hasPlan = TryGetUpgraderSlotUpgradePlan(
+                    out int currentTier,
+                    out int nextTier,
+                    out int nextDiskType,
+                    out MaterialRequirement[] materials,
+                    out string statusText);
+
+                if (hasPlan)
+                {
+                    UIRenderer.DrawText(
+                        $"{StorageDiskCatalog.GetTierName(currentTier)} -> {StorageDiskCatalog.GetTierName(nextTier)}",
+                        textX,
+                        textY,
+                        UIColors.AccentText);
+                }
+                else
+                {
+                    UIRenderer.DrawText(statusText, textX, textY, UIColors.TextHint);
+                }
+
+                int rowY = textY + 30;
+                bool canAfford = hasPlan;
+
+                if (materials != null && materials.Length > 0)
+                {
+                    UIRenderer.DrawText("Upgrade Cost", textX, rowY, UIColors.TextDim);
+                    rowY += 22;
+
+                    for (int i = 0; i < materials.Length; i++)
+                    {
+                        var req = materials[i];
+                        int materialType = ItemRegistry.ResolveItemType(req.ItemRef);
+                        int available = CountItemInInventory(inventory, materialType);
+                        bool enough = available >= req.Count;
+                        canAfford &= enough;
+
+                        if (materialType > 0)
+                            UIRenderer.DrawItem(materialType, textX, rowY - 2, 20, 20);
+
+                        string label = $"{FormatMaterialLabel(req.ItemRef)} {available}/{req.Count}";
+                        UIRenderer.DrawText(label, textX + 24, rowY + 2, enough ? UIColors.Success : UIColors.Warning);
+                        rowY += 24;
+                    }
+                }
+
+                int buttonW = 150;
+                int buttonH = 34;
+                int buttonX = x + DiskUpgraderPanelWidth - buttonW - 20;
+                int buttonY = y + DiskUpgraderPanelHeight - buttonH - 18;
+                bool canClickUpgrade = hasPlan && canAfford;
+                bool upgradeHover = WidgetInput.IsMouseOver(buttonX, buttonY, buttonW, buttonH) && !blockInput && canClickUpgrade;
+
+                UIRenderer.DrawRect(
+                    buttonX,
+                    buttonY,
+                    buttonW,
+                    buttonH,
+                    canClickUpgrade
+                        ? (upgradeHover ? UIColors.Success : UIColors.Success.WithAlpha(200))
+                        : UIColors.Button.WithAlpha(120));
+                UIRenderer.DrawText(
+                    "Upgrade Disk",
+                    buttonX + 28,
+                    buttonY + 10,
+                    canClickUpgrade ? UIColors.Text : UIColors.TextHint);
+
+                if (upgradeHover && WidgetInput.MouseLeftClick)
+                {
+                    WidgetInput.ConsumeClick();
+                    if (TryUpgradeDiskInSlot(nextDiskType, materials, out string failReason))
+                    {
+                        GameText.Show($"Upgraded to {StorageDiskCatalog.GetTierName(nextTier)}");
+                    }
+                    else if (!string.IsNullOrWhiteSpace(failReason))
+                    {
+                        GameText.Show(failReason);
+                    }
+                }
+
+                if (!blockInput && UIRenderer.IsMouseOver(x, y, DiskUpgraderPanelWidth, DiskUpgraderPanelHeight))
+                {
+                    if (WidgetInput.MouseLeftClick)
+                        WidgetInput.ConsumeClick();
+                    if (WidgetInput.MouseRightClick)
+                        WidgetInput.ConsumeRightClick();
+                    if (WidgetInput.ScrollWheel != 0)
+                        WidgetInput.ConsumeScroll();
+                }
+
+                ItemTooltip.DrawDeferred();
+            }
+            catch (Exception ex)
+            {
+                _log.Error($"Disk upgrader UI draw error: {ex.Message}");
+            }
+            finally
+            {
+                WidgetInput.BlockInput = false;
+            }
+        }
+
+        private void HandleDiskUpgraderDragging(bool blockInput)
+        {
+            bool inHeader = WidgetInput.IsMouseOver(
+                _diskUpgraderPanelX,
+                _diskUpgraderPanelY,
+                DiskUpgraderPanelWidth - 40,
+                DiskUpgraderHeaderHeight) && !blockInput;
+
+            if (WidgetInput.MouseLeftClick && inHeader && !_diskUpgraderDragging)
+            {
+                _diskUpgraderDragging = true;
+                _diskUpgraderDragOffsetX = WidgetInput.MouseX - _diskUpgraderPanelX;
+                _diskUpgraderDragOffsetY = WidgetInput.MouseY - _diskUpgraderPanelY;
+            }
+
+            if (_diskUpgraderDragging)
+            {
+                if (WidgetInput.MouseLeft)
+                {
+                    _diskUpgraderPanelX = WidgetInput.MouseX - _diskUpgraderDragOffsetX;
+                    _diskUpgraderPanelY = WidgetInput.MouseY - _diskUpgraderDragOffsetY;
+                }
+                else
+                {
+                    _diskUpgraderDragging = false;
+                }
+            }
+        }
+
+        private void HandleDiskUpgraderSlotClick()
+        {
+            if (!HasDiskInUpgraderSlot())
+            {
+                TryTakeDiskFromMouseToUpgraderSlot();
+                return;
+            }
+
+            if (TryMoveUpgraderDiskToMouse())
+                return;
+
+            TrySwapUpgraderDiskWithMouseDisk();
+        }
+
+        private bool TryTakeDiskFromMouseToUpgraderSlot()
+        {
+            object mouseItem = GetMouseItem();
+            if (mouseItem == null)
+                return false;
+
+            int mouseType = GetSafeInt(_itemTypeField, mouseItem, 0);
+            if (!DedicatedBlocksManager.TryGetDiskTierForItemType(mouseType, out _))
+                return false;
+
+            int mouseStack = Math.Max(0, GetSafeInt(_itemStackField, mouseItem, 0));
+            if (mouseStack <= 0)
+                return false;
+
+            _upgraderSlotItemType = mouseType;
+            _upgraderSlotPrefix = GetSafeInt(_itemPrefixField, mouseItem, 0);
+            _upgraderSlotStack = 1;
+
+            if (mouseStack <= 1)
+            {
+                ClearItem(mouseItem);
+            }
+            else
+            {
+                _itemStackField?.SetValue(mouseItem, mouseStack - 1);
+            }
+
+            return true;
+        }
+
+        private bool TryMoveUpgraderDiskToMouse()
+        {
+            if (!HasDiskInUpgraderSlot())
+                return false;
+
+            object mouseItem = GetMouseItem();
+            if (mouseItem == null || !IsItemEmpty(mouseItem))
+                return false;
+
+            if (!TrySetItemData(mouseItem, _upgraderSlotItemType, _upgraderSlotStack, _upgraderSlotPrefix))
+                return false;
+
+            ClearUpgraderSlot();
+            return true;
+        }
+
+        private bool TrySwapUpgraderDiskWithMouseDisk()
+        {
+            if (!HasDiskInUpgraderSlot())
+                return false;
+
+            object mouseItem = GetMouseItem();
+            if (mouseItem == null)
+                return false;
+
+            int mouseType = GetSafeInt(_itemTypeField, mouseItem, 0);
+            if (!DedicatedBlocksManager.TryGetDiskTierForItemType(mouseType, out _))
+                return false;
+
+            int mousePrefix = GetSafeInt(_itemPrefixField, mouseItem, 0);
+
+            int slotType = _upgraderSlotItemType;
+            int slotStack = _upgraderSlotStack;
+            int slotPrefix = _upgraderSlotPrefix;
+
+            if (!TrySetItemData(mouseItem, slotType, slotStack, slotPrefix))
+                return false;
+
+            _upgraderSlotItemType = mouseType;
+            _upgraderSlotStack = 1;
+            _upgraderSlotPrefix = mousePrefix;
+            return true;
+        }
+
+        private bool TryGetUpgraderSlotUpgradePlan(
+            out int currentTier,
+            out int nextTier,
+            out int nextDiskType,
+            out MaterialRequirement[] materials,
+            out string statusText)
+        {
+            currentTier = StorageDiskCatalog.None;
+            nextTier = StorageDiskCatalog.None;
+            nextDiskType = -1;
+            materials = null;
+
+            if (!HasDiskInUpgraderSlot())
+            {
+                statusText = "Place a storage disk in the slot.";
+                return false;
+            }
+
+            if (!DedicatedBlocksManager.TryGetDiskTierForItemType(_upgraderSlotItemType, out currentTier))
+            {
+                statusText = "That item is not a valid storage disk.";
+                return false;
+            }
+
+            if (currentTier >= StorageDiskCatalog.Quantum)
+            {
+                statusText = "Disk is already at maximum tier.";
+                return false;
+            }
+
+            nextTier = currentTier + 1;
+            nextDiskType = DedicatedBlocksManager.ResolveDiskItemType(nextTier);
+            if (nextDiskType <= 0)
+            {
+                statusText = "Unable to resolve the next disk tier.";
+                return false;
+            }
+
+            if (!TryGetDiskUpgradeMaterials(currentTier, out materials))
+            {
+                statusText = "No upgrade path found for this disk.";
+                return false;
+            }
+
+            statusText = string.Empty;
+            return true;
+        }
+
+        private bool TryUpgradeDiskInSlot(
+            int nextDiskType,
+            MaterialRequirement[] materials,
+            out string failureReason)
+        {
+            failureReason = null;
+
+            if (!HasDiskInUpgraderSlot())
+            {
+                failureReason = "Place a storage disk in the slot.";
+                return false;
+            }
+
+            if (_driveStorage == null)
+            {
+                failureReason = "Disk storage is not ready yet.";
+                return false;
+            }
+
+            var player = GetLocalPlayer();
+            if (player == null)
+            {
+                failureReason = "Player not available.";
+                return false;
+            }
+
+            if (nextDiskType <= 0 || !DedicatedBlocksManager.TryGetDiskTierForItemType(nextDiskType, out _))
+            {
+                failureReason = "Unable to resolve the next disk tier.";
+                return false;
+            }
+
+            if (!TryConsumePlayerMaterials(player, materials, out string missingMessage))
+            {
+                failureReason = missingMessage;
+                return false;
+            }
+
+            int diskUid = _upgraderSlotPrefix;
+            if (diskUid <= 0)
+            {
+                diskUid = _driveStorage.AllocateDiskUid(_upgraderSlotItemType);
+                if (diskUid <= 0)
+                {
+                    failureReason = "No free disk IDs available.";
+                    return false;
+                }
+
+                _upgraderSlotPrefix = diskUid;
+                _driveStorage.EnsureDisk(_upgraderSlotItemType, diskUid);
+            }
+
+            if (!_driveStorage.TryUpgradeDiskIdentity(
+                _upgraderSlotItemType,
+                diskUid,
+                nextDiskType,
+                out int upgradedUid,
+                out string reason))
+            {
+                failureReason = string.IsNullOrWhiteSpace(reason) ? "Disk upgrade failed." : reason;
+                return false;
+            }
+
+            _upgraderSlotItemType = nextDiskType;
+            _upgraderSlotStack = 1;
+            _upgraderSlotPrefix = upgradedUid;
+            _driveStorage.MarkDirty();
+            _ui?.MarkDirty();
+
+            return true;
+        }
+
+        private bool TryReturnUpgraderSlotItemToPlayer(bool showMessageOnFailure)
+        {
+            if (!HasDiskInUpgraderSlot())
+                return true;
+
+            object player = GetLocalPlayer();
+            if (TryStoreItemInInventory(player, _upgraderSlotItemType, _upgraderSlotStack, _upgraderSlotPrefix))
+            {
+                ClearUpgraderSlot();
+                return true;
+            }
+
+            object mouseItem = GetMouseItem();
+            if (mouseItem != null && IsItemEmpty(mouseItem) &&
+                TrySetItemData(mouseItem, _upgraderSlotItemType, _upgraderSlotStack, _upgraderSlotPrefix))
+            {
+                ClearUpgraderSlot();
+                return true;
+            }
+
+            if (showMessageOnFailure)
+                GameText.Show("No room to return disk. Free inventory or cursor.");
+
+            return false;
+        }
+
+        private bool TryStoreItemInInventory(object player, int itemType, int stack, int prefix)
+        {
+            if (player == null || itemType <= 0 || stack <= 0)
+                return false;
+
+            var inventory = _playerInventoryField?.GetValue(player) as Array;
+            if (inventory == null)
+                return false;
+
+            for (int i = 0; i < inventory.Length; i++)
+            {
+                object item = inventory.GetValue(i);
+                if (item == null || !IsItemEmpty(item))
+                    continue;
+
+                if (TrySetItemData(item, itemType, stack, prefix))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private bool TrySetItemData(object item, int itemType, int stack, int prefix)
+        {
+            if (item == null || itemType <= 0 || stack <= 0)
+                return false;
+
+            if (!InvokeItemSetDefaults(item, itemType))
+                return false;
+
+            _itemStackField?.SetValue(item, Math.Max(1, stack));
+            SetItemPrefix(item, prefix);
+            return true;
+        }
+
+        private object GetMouseItem()
+        {
+            try
+            {
+                return _mouseItemField?.GetValue(null);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool IsItemEmpty(object item)
+        {
+            if (item == null)
+                return true;
+
+            int type = GetSafeInt(_itemTypeField, item, 0);
+            int stack = GetSafeInt(_itemStackField, item, 0);
+            return type <= 0 || stack <= 0;
+        }
+
+        private void ClearItem(object item)
+        {
+            if (item == null)
+                return;
+
+            if (InvokeItemSetDefaults(item, 0))
+            {
+                _itemStackField?.SetValue(item, 0);
+                SetItemPrefix(item, 0);
+                return;
+            }
+
+            _itemTypeField?.SetValue(item, 0);
+            _itemStackField?.SetValue(item, 0);
+            SetItemPrefix(item, 0);
+        }
+
+        private bool HasDiskInUpgraderSlot()
+        {
+            if (_upgraderSlotItemType <= 0 || _upgraderSlotStack <= 0)
+                return false;
+
+            return DedicatedBlocksManager.TryGetDiskTierForItemType(_upgraderSlotItemType, out _);
+        }
+
+        private void ClearUpgraderSlot()
+        {
+            _upgraderSlotItemType = 0;
+            _upgraderSlotPrefix = 0;
+            _upgraderSlotStack = 0;
+        }
+
+        private static string FormatMaterialLabel(string itemRef)
+        {
+            if (string.IsNullOrWhiteSpace(itemRef))
+                return "Unknown";
+
+            var chars = new List<char>(itemRef.Length + 4);
+            for (int i = 0; i < itemRef.Length; i++)
+            {
+                char c = itemRef[i];
+                if (i > 0 && char.IsUpper(c) && !char.IsUpper(itemRef[i - 1]))
+                    chars.Add(' ');
+                chars.Add(c);
+            }
+
+            return new string(chars.ToArray());
         }
 
         private bool OpenDedicatedNetwork(int tileX, int tileY, bool preferCraftingTab)
@@ -1357,62 +1989,166 @@ namespace StorageHub
             }
         }
 
-        private int GetHeldItemType(object player, out object heldItem)
+        private static bool TryGetDiskUpgradeMaterials(int currentTier, out MaterialRequirement[] materials)
         {
-            heldItem = null;
-            if (player == null)
-                return 0;
-
-            try
+            materials = null;
+            switch (currentTier)
             {
-                int selected = GetSafeInt(_playerSelectedItemField, player, 0);
-                var inventory = _playerInventoryField?.GetValue(player) as Array;
-                if (inventory == null || selected < 0 || selected >= inventory.Length)
-                    return 0;
+                case StorageDiskCatalog.Basic:
+                    materials = new[]
+                    {
+                        new MaterialRequirement("Ruby", 1),
+                        new MaterialRequirement("GoldBar", 2)
+                    };
+                    return true;
 
-                heldItem = inventory.GetValue(selected);
-                if (heldItem == null)
-                    return 0;
+                case StorageDiskCatalog.Improved:
+                    materials = new[]
+                    {
+                        new MaterialRequirement("Diamond", 1),
+                        new MaterialRequirement("GoldBar", 4)
+                    };
+                    return true;
 
-                return GetSafeInt(_itemTypeField, heldItem, 0);
-            }
-            catch
-            {
-                return 0;
+                case StorageDiskCatalog.Advanced:
+                    materials = new[]
+                    {
+                        new MaterialRequirement("Diamond", 2),
+                        new MaterialRequirement("GoldBar", 8)
+                    };
+                    return true;
+
+                default:
+                    return false;
             }
         }
 
-        private bool ConsumeHeldItem(object heldItem, int amount)
+        private bool TryConsumePlayerMaterials(object player, MaterialRequirement[] materials, out string missingMessage)
         {
-            if (heldItem == null || amount <= 0 || _itemStackField == null)
+            missingMessage = "Missing required upgrade materials.";
+            if (player == null || materials == null || materials.Length == 0)
                 return false;
 
-            try
-            {
-                int stack = GetSafeInt(_itemStackField, heldItem, 0);
-                if (stack < amount)
-                    return false;
+            var inventory = _playerInventoryField?.GetValue(player) as Array;
+            if (inventory == null || _itemTypeField == null || _itemStackField == null)
+                return false;
 
-                int newStack = stack - amount;
+            for (int i = 0; i < materials.Length; i++)
+            {
+                var req = materials[i];
+                int itemType = ItemRegistry.ResolveItemType(req.ItemRef);
+                if (itemType <= 0)
+                {
+                    missingMessage = $"Unknown material: {req.ItemRef}";
+                    return false;
+                }
+
+                int available = CountItemInInventory(inventory, itemType);
+                if (available < req.Count)
+                {
+                    missingMessage = $"Need {req.Count}x {req.ItemRef}";
+                    return false;
+                }
+            }
+
+            for (int i = 0; i < materials.Length; i++)
+            {
+                var req = materials[i];
+                int itemType = ItemRegistry.ResolveItemType(req.ItemRef);
+                if (itemType <= 0 || !ConsumeInventoryItem(inventory, itemType, req.Count))
+                {
+                    missingMessage = "Failed to consume upgrade materials.";
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private int CountItemInInventory(Array inventory, int itemType)
+        {
+            if (inventory == null || itemType <= 0 || _itemTypeField == null || _itemStackField == null)
+                return 0;
+
+            int total = 0;
+            for (int i = 0; i < inventory.Length; i++)
+            {
+                var item = inventory.GetValue(i);
+                if (item == null)
+                    continue;
+
+                int type = GetSafeInt(_itemTypeField, item, 0);
+                if (type != itemType)
+                    continue;
+
+                total += Math.Max(0, GetSafeInt(_itemStackField, item, 0));
+            }
+
+            return total;
+        }
+
+        private bool ConsumeInventoryItem(Array inventory, int itemType, int amount)
+        {
+            if (inventory == null || itemType <= 0 || amount <= 0 || _itemTypeField == null || _itemStackField == null)
+                return false;
+
+            if (CountItemInInventory(inventory, itemType) < amount)
+                return false;
+
+            int remaining = amount;
+            for (int i = 0; i < inventory.Length && remaining > 0; i++)
+            {
+                var item = inventory.GetValue(i);
+                if (item == null)
+                    continue;
+
+                int type = GetSafeInt(_itemTypeField, item, 0);
+                if (type != itemType)
+                    continue;
+
+                int stack = GetSafeInt(_itemStackField, item, 0);
+                if (stack <= 0)
+                    continue;
+
+                int take = Math.Min(stack, remaining);
+                int newStack = stack - take;
+                remaining -= take;
+
                 if (newStack > 0)
                 {
-                    _itemStackField.SetValue(heldItem, newStack);
-                    return true;
+                    _itemStackField.SetValue(item, newStack);
+                    continue;
                 }
 
-                if (InvokeItemSetDefaults(heldItem, 0))
+                if (InvokeItemSetDefaults(item, 0))
                 {
-                    _itemStackField?.SetValue(heldItem, 0);
-                    return true;
+                    _itemStackField?.SetValue(item, 0);
+                    continue;
                 }
 
-                _itemTypeField?.SetValue(heldItem, 0);
-                _itemStackField?.SetValue(heldItem, 0);
-                return true;
+                _itemTypeField?.SetValue(item, 0);
+                _itemStackField?.SetValue(item, 0);
+            }
+
+            return remaining <= 0;
+        }
+
+        private void SetItemPrefix(object item, int prefix)
+        {
+            if (item == null || _itemPrefixField == null)
+                return;
+
+            int clamped = Math.Max(0, Math.Min(byte.MaxValue, prefix));
+            try
+            {
+                if (_itemPrefixField.FieldType == typeof(byte))
+                    _itemPrefixField.SetValue(item, (byte)clamped);
+                else
+                    _itemPrefixField.SetValue(item, clamped);
             }
             catch
             {
-                return false;
+                // Best effort.
             }
         }
 
@@ -1551,6 +2287,18 @@ namespace StorageHub
             {
                 _log.Error($"GetCharacterName error: {ex.Message}");
                 return "Unknown";
+            }
+        }
+
+        private readonly struct MaterialRequirement
+        {
+            public string ItemRef { get; }
+            public int Count { get; }
+
+            public MaterialRequirement(string itemRef, int count)
+            {
+                ItemRef = itemRef;
+                Count = count;
             }
         }
     }

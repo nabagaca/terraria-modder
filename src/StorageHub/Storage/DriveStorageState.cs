@@ -203,6 +203,70 @@ namespace StorageHub.Storage
             _dirty = true;
         }
 
+        public bool TryUpgradeDiskIdentity(
+            int oldDiskItemType,
+            int oldDiskUid,
+            int newDiskItemType,
+            out int resultingDiskUid,
+            out string failureReason)
+        {
+            resultingDiskUid = 0;
+            failureReason = null;
+
+            if (!IsValidDiskIdentity(oldDiskItemType, oldDiskUid))
+            {
+                failureReason = "Invalid source disk identity.";
+                return false;
+            }
+
+            if (!DedicatedBlocksManager.TryGetDiskTierForItemType(newDiskItemType, out _))
+            {
+                failureReason = "Invalid target disk type.";
+                return false;
+            }
+
+            if (oldDiskItemType == newDiskItemType)
+            {
+                resultingDiskUid = oldDiskUid;
+                return true;
+            }
+
+            string oldKey = BuildDiskKey(oldDiskItemType, oldDiskUid);
+            int targetUid = oldDiskUid;
+            string targetKey = BuildDiskKey(newDiskItemType, targetUid);
+
+            if (_disks.ContainsKey(targetKey))
+            {
+                targetUid = AllocateDiskUid(newDiskItemType);
+                if (targetUid <= 0)
+                {
+                    failureReason = "No free disk IDs for target tier.";
+                    return false;
+                }
+
+                targetKey = BuildDiskKey(newDiskItemType, targetUid);
+            }
+
+            if (_disks.TryGetValue(oldKey, out var oldDisk))
+            {
+                var migrated = new DiskRecord(newDiskItemType, targetUid);
+                for (int i = 0; i < oldDisk.Items.Count; i++)
+                {
+                    var entry = oldDisk.Items[i];
+                    if (entry.ItemId <= 0 || entry.Stack <= 0)
+                        continue;
+                    migrated.Items.Add(entry);
+                }
+
+                _disks[targetKey] = migrated;
+                _disks.Remove(oldKey);
+                _dirty = true;
+            }
+
+            resultingDiskUid = targetUid;
+            return true;
+        }
+
         private static bool IsValidDiskIdentity(int diskItemType, int diskUid)
         {
             if (diskUid <= 0 || diskUid > byte.MaxValue)
