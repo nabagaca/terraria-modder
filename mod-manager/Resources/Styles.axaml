@@ -1,0 +1,197 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Styles.Resources>
+        <!-- Colors — dark theme, green used ONLY for tiny accents (badges, status text, sidebar title) -->
+        <Color x:Key="BgDark">#FF1A1D21</Color>
+        <Color x:Key="BgMedium">#FF22262B</Color>
+        <Color x:Key="BgLight">#FF2C3138</Color>
+        <Color x:Key="BgElevated">#FF3A4049</Color>
+        <Color x:Key="Accent">#FF58EB1C</Color>
+        <Color x:Key="AccentMuted">#FF3EA314</Color>
+        <Color x:Key="AccentSubtle">#FF1E3316</Color>
+        <Color x:Key="TextPrimary">#FFE2E4E8</Color>
+        <Color x:Key="TextSecondary">#FF7C828D</Color>
+        <Color x:Key="BorderColor">#FF32373E</Color>
+        <Color x:Key="Success">#FF58EB1C</Color>
+        <Color x:Key="Warning">#FFE8B93C</Color>
+        <Color x:Key="Danger">#FFE05252</Color>
+        <Color x:Key="BtnPrimary">#FF3A4049</Color>
+        <Color x:Key="BtnPrimaryHover">#FF464D57</Color>
+
+        <SolidColorBrush x:Key="BgDarkBrush" Color="{StaticResource BgDark}"/>
+        <SolidColorBrush x:Key="BgMediumBrush" Color="{StaticResource BgMedium}"/>
+        <SolidColorBrush x:Key="BgLightBrush" Color="{StaticResource BgLight}"/>
+        <SolidColorBrush x:Key="BgElevatedBrush" Color="{StaticResource BgElevated}"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource Accent}"/>
+        <SolidColorBrush x:Key="AccentMutedBrush" Color="{StaticResource AccentMuted}"/>
+        <SolidColorBrush x:Key="AccentSubtleBrush" Color="{StaticResource AccentSubtle}"/>
+        <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
+        <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
+        <SolidColorBrush x:Key="BorderColorBrush" Color="{StaticResource BorderColor}"/>
+        <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource Success}"/>
+        <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource Warning}"/>
+        <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource Danger}"/>
+        <SolidColorBrush x:Key="BtnPrimaryBrush" Color="{StaticResource BtnPrimary}"/>
+        <SolidColorBrush x:Key="BtnPrimaryHoverBrush" Color="{StaticResource BtnPrimaryHover}"/>
+    </Styles.Resources>
+
+    <!-- Window base -->
+    <Style Selector="Window">
+        <Setter Property="Background" Value="{StaticResource BgDarkBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="FontFamily" Value="Inter, Segoe UI, sans-serif"/>
+        <Setter Property="FontSize" Value="13"/>
+    </Style>
+
+    <!-- TextBlock default -->
+    <Style Selector="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- ScrollViewer dark theme -->
+    <Style Selector="ScrollViewer">
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+
+    <!-- ProgressBar default -->
+    <Style Selector="ProgressBar">
+        <Setter Property="Background" Value="{StaticResource BgDarkBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource AccentMutedBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="MinHeight" Value="6"/>
+        <Setter Property="MaxHeight" Value="6"/>
+    </Style>
+
+    <!-- Sidebar nav button -->
+    <Style Selector="Button.nav">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="16,12"/>
+        <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Margin" Value="4,2"/>
+    </Style>
+    <Style Selector="Button.nav:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgLightBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="Button.nav:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- Primary button -->
+    <Style Selector="Button.primary">
+        <Setter Property="Background" Value="{StaticResource BtnPrimaryBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BtnPrimaryHoverBrush}"/>
+    </Style>
+    <Style Selector="Button.primary:disabled">
+        <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+
+    <!-- Secondary button -->
+    <Style Selector="Button.secondary">
+        <Setter Property="Background" Value="{StaticResource BgLightBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.secondary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="Button.secondary:disabled">
+        <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+
+    <!-- Danger button -->
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="{StaticResource BgLightBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+    </Style>
+    <Style Selector="Button.danger:disabled">
+        <Setter Property="Opacity" Value="0.4"/>
+    </Style>
+
+    <!-- Dark TextBox -->
+    <Style Selector="TextBox.dark">
+        <Setter Property="Background" Value="{StaticResource BgDarkBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderColorBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="CaretBrush" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource AccentMutedBrush}"/>
+    </Style>
+
+    <!-- Card panel -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{StaticResource BgMediumBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderColorBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="16"/>
+    </Style>
+
+    <!-- Section header -->
+    <Style Selector="TextBlock.section-header">
+        <Setter Property="FontSize" Value="18"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Margin" Value="0,0,0,12"/>
+    </Style>
+
+    <!-- Label text -->
+    <Style Selector="TextBlock.label">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Margin" Value="0,0,0,4"/>
+    </Style>
+
+    <!-- ListBox dark (replaces WPF ListView) -->
+    <Style Selector="ListBox.dark">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- ListBoxItem dark -->
+    <Style Selector="ListBox.dark ListBoxItem">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+        <Setter Property="Padding" Value="8,6"/>
+        <Setter Property="Margin" Value="0,1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+    </Style>
+    <Style Selector="ListBox.dark ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgLightBrush}"/>
+    </Style>
+    <Style Selector="ListBox.dark ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{StaticResource BgElevatedBrush}"/>
+    </Style>
+
+</Styles>

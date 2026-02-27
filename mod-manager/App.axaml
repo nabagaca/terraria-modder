@@ -1,0 +1,14 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:TerrariaModManager.ViewModels"
+             x:Class="TerrariaModManager.App"
+             RequestedThemeVariant="Dark">
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://TerrariaModManager/Resources/Styles.axaml"/>
+    </Application.Styles>
+    <Application.Resources>
+        <vm:BoolInverterConverter x:Key="BoolInvert"/>
+        <vm:CountToBoolConverter x:Key="CountToBool"/>
+    </Application.Resources>
+</Application>

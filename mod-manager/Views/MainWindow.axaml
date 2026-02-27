@@ -1,0 +1,78 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:TerrariaModManager.ViewModels"
+        xmlns:v="using:TerrariaModManager.Views"
+        x:Class="TerrariaModManager.Views.MainWindow"
+        Title="TerrariaModder Manager" Width="1100" Height="700"
+        MinWidth="800" MinHeight="500"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.DataTemplates>
+        <DataTemplate DataType="vm:InstalledModsViewModel">
+            <v:InstalledModsView/>
+        </DataTemplate>
+        <DataTemplate DataType="vm:BrowseViewModel">
+            <v:BrowseView/>
+        </DataTemplate>
+        <DataTemplate DataType="vm:DownloadsViewModel">
+            <v:DownloadsView/>
+        </DataTemplate>
+        <DataTemplate DataType="vm:SettingsViewModel">
+            <v:SettingsView/>
+        </DataTemplate>
+    </Window.DataTemplates>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- Sidebar -->
+        <Border Grid.Column="0" Background="{StaticResource BgMediumBrush}"
+                BorderBrush="{StaticResource BorderColorBrush}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <!-- App title -->
+                <StackPanel DockPanel.Dock="Top" Margin="16,20,16,24">
+                    <TextBlock Text="TerrariaModder" FontSize="16" FontWeight="Bold"
+                               Foreground="{StaticResource AccentBrush}"/>
+                    <TextBlock Text="Manager" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+                               Margin="0,2,0,0"/>
+                </StackPanel>
+
+                <!-- Launch + version at bottom -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="8,0,8,12">
+                    <Button Content="Launch Modded" Classes="primary"
+                            Command="{Binding LaunchModdedCommand}" Margin="0,0,0,4"/>
+                    <Button Content="Launch Vanilla" Classes="primary"
+                            Command="{Binding LaunchVanillaCommand}" Margin="0,0,0,8"/>
+                    <TextBlock Text="v0.1.0" Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="11" Margin="8,0,0,0"/>
+                </StackPanel>
+
+                <!-- Nav buttons -->
+                <StackPanel Margin="4,0">
+                    <Button Content="Installed Mods" Classes="nav"
+                            Command="{Binding ShowInstalledCommand}"/>
+                    <Button Content="Browse Nexus" Classes="nav"
+                            Command="{Binding ShowBrowseCommand}"/>
+                    <Button Content="Downloads" Classes="nav"
+                            Command="{Binding ShowDownloadsCommand}"/>
+                    <Button Content="Settings" Classes="nav"
+                            Command="{Binding ShowSettingsCommand}"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Content area -->
+        <ContentControl Grid.Column="1" Content="{Binding CurrentView}"/>
+
+        <!-- Status bar -->
+        <Border Grid.Column="0" Grid.ColumnSpan="2" VerticalAlignment="Bottom"
+                Background="{StaticResource BgMediumBrush}" Height="28"
+                BorderBrush="{StaticResource BorderColorBrush}" BorderThickness="0,1,0,0">
+            <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource TextSecondaryBrush}"
+                       FontSize="11" VerticalAlignment="Center" Margin="12,0"/>
+        </Border>
+    </Grid>
+</Window>
