@@ -24,6 +24,28 @@
       "label": "Unlock High Res Modes",
       "description": "Raise Terraria's internal resolution caps and register native monitor resolutions"
     },
+    "persistResolution": {
+      "type": "bool",
+      "default": true,
+      "label": "Persist Resolution",
+      "description": "Save the active resolution in Widescreen Tools config and restore it on startup"
+    },
+    "desiredResolutionWidth": {
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 8192,
+      "label": "Saved Resolution Width",
+      "description": "Last widescreen resolution width saved by the mod"
+    },
+    "desiredResolutionHeight": {
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 8192,
+      "label": "Saved Resolution Height",
+      "description": "Last widescreen resolution height saved by the mod"
+    },
     "worldViewWidth": {
       "type": "int",
       "default": 5120,
