@@ -1,13 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <Version>0.1.0</Version>
     <TargetFramework>net48</TargetFramework>
-    <LangVersion>latest</LangVersion>
+    <AssemblyName>WidescreenTools</AssemblyName>
+    <RootNamespace>WidescreenTools</RootNamespace>
     <OutputType>Library</OutputType>
-    <AssemblyName>TerrariaModder.Core</AssemblyName>
-    <RootNamespace>TerrariaModder.Core</RootNamespace>
-    <OutputPath>..\..\build\core\</OutputPath>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>..\..\build\plugins\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <TerrariaInstallDir Condition="'$(TerrariaInstallDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Terraria</TerrariaInstallDir>
@@ -16,14 +14,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Lib.Harmony" Version="2.3.3" />
+    <ProjectReference Include="..\Core\TerrariaModder.Core.csproj">
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>..\..\Terraria\Mods\Libs\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="Terraria" Condition="Exists('$(TerrariaAssemblyPath)')">
       <HintPath>$(TerrariaAssemblyPath)</HintPath>
-      <Private>False</Private>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
-
 </Project>

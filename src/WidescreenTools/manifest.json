@@ -1,0 +1,38 @@
+{
+  "id": "widescreen-tools",
+  "name": "Widescreen Tools",
+  "version": "0.1.0",
+  "author": "OpenAI",
+  "description": "Experimental widescreen support that relaxes Terraria's forced minimum zoom for ultrawide displays.",
+  "entry_dll": "WidescreenTools.dll",
+  "config_schema": {
+    "enabled": {
+      "type": "bool",
+      "default": true,
+      "label": "Enabled",
+      "description": "Enable widescreen zoom overrides"
+    },
+    "overrideForcedMinimumZoom": {
+      "type": "bool",
+      "default": true,
+      "label": "Override Forced Zoom",
+      "description": "Replace Terraria's vanilla world-view limit used to force zoom on large resolutions"
+    },
+    "worldViewWidth": {
+      "type": "int",
+      "default": 5120,
+      "min": 3839,
+      "max": 8192,
+      "label": "World View Width",
+      "description": "Reference world-view width used when computing the minimum zoom"
+    },
+    "worldViewHeight": {
+      "type": "int",
+      "default": 1440,
+      "min": 1200,
+      "max": 8192,
+      "label": "World View Height",
+      "description": "Reference world-view height used when computing the minimum zoom"
+    }
+  }
+}
