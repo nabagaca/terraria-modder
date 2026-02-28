@@ -15,6 +15,7 @@ namespace WidescreenTools
         private ModContext _context;
         private bool _enabled;
         private bool _overrideForcedMinimumZoom;
+        private bool _unlockHighResModes;
         private int _worldViewWidth;
         private int _worldViewHeight;
         private bool _pendingApply = true;
@@ -25,7 +26,9 @@ namespace WidescreenTools
             _context = context;
 
             WidescreenZoomOverride.Initialize(_log);
+            WidescreenResolutionOverride.Initialize(_log);
             LoadConfigValues();
+            ApplyResolutionOverrides();
             FrameEvents.OnPostUpdate += OnPostUpdate;
 
             _log.Info($"{Name} v{Version} initialized");
@@ -71,6 +74,7 @@ namespace WidescreenTools
 
             _enabled = _context.Config.Get("enabled", true);
             _overrideForcedMinimumZoom = _context.Config.Get("overrideForcedMinimumZoom", true);
+            _unlockHighResModes = _context.Config.Get("unlockHighResModes", true);
             _worldViewWidth = _context.Config.Get("worldViewWidth", 5120);
             _worldViewHeight = _context.Config.Get("worldViewHeight", 1440);
 
@@ -87,6 +91,8 @@ namespace WidescreenTools
 
         private void ApplyConfiguredOverrides()
         {
+            ApplyResolutionOverrides();
+
             if (!_enabled || !_overrideForcedMinimumZoom)
             {
                 WidescreenZoomOverride.RestoreOriginal();
@@ -98,6 +104,16 @@ namespace WidescreenTools
             {
                 _log.Info($"[WidescreenTools] Forced minimum zoom comparer set to {_worldViewWidth}x{_worldViewHeight}");
             }
+        }
+
+        private void ApplyResolutionOverrides()
+        {
+            if (!_enabled || !_unlockHighResModes)
+            {
+                return;
+            }
+
+            WidescreenResolutionOverride.Apply();
         }
     }
 }
