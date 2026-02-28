@@ -18,6 +18,12 @@
       "label": "Override Forced Zoom",
       "description": "Replace Terraria's vanilla world-view limit used to force zoom on large resolutions"
     },
+    "unlockHighResModes": {
+      "type": "bool",
+      "default": true,
+      "label": "Unlock High Res Modes",
+      "description": "Raise Terraria's internal resolution caps and register native monitor resolutions"
+    },
     "worldViewWidth": {
       "type": "int",
       "default": 5120,

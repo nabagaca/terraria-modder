@@ -5,6 +5,7 @@
     <RootNamespace>WidescreenTools</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
+    <UseWindowsForms>true</UseWindowsForms>
     <OutputPath>..\..\build\plugins\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
