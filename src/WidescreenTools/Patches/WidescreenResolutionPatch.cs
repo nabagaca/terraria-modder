@@ -10,6 +10,7 @@ namespace WidescreenTools.Patches
         private static void CacheSupportedDisplaySizes_Postfix()
         {
             WidescreenResolutionOverride.Apply();
+            Mod.Instance?.ApplySavedResolutionFromCache();
         }
     }
 }
