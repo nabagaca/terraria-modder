@@ -1,6 +1,6 @@
 using System;
-using System.Reflection;
 using System.Runtime.InteropServices;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace DebugTools
@@ -121,20 +121,12 @@ namespace DebugTools
         {
             try
             {
-                var mainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
-                if (mainType == null) return IntPtr.Zero;
+                if (Main.instance == null) return IntPtr.Zero;
 
-                var instance = mainType.GetField("instance",
-                    BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-                if (instance == null) return IntPtr.Zero;
+                var window = Main.instance.Window;
+                if (window == null) return IntPtr.Zero;
 
-                var gameWindow = mainType.GetProperty("Window")?.GetValue(instance);
-                if (gameWindow == null) return IntPtr.Zero;
-
-                var handle = gameWindow.GetType().GetProperty("Handle")?.GetValue(gameWindow);
-                if (handle is IntPtr h && h != IntPtr.Zero)
-                    return h;
+                return window.Handle;
             }
             catch { }
 

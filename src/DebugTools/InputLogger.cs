@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Terraria;
 using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.Reflection;
 
@@ -71,7 +72,7 @@ namespace DebugTools
             int menuMode = -1;
             if (!inWorld)
             {
-                try { menuMode = GameAccessor.TryGetMainField<int>("menuMode", -1); }
+                try { menuMode = Main.menuMode; }
                 catch { }
             }
 

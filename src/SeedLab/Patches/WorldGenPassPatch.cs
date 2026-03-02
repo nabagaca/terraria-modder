@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace SeedLab.Patches
@@ -45,10 +46,8 @@ namespace SeedLab.Patches
             _log = log;
             _manager = manager;
 
-            var terrariaAsm = Assembly.Load("Terraria");
-
             // Find GenPass.Apply
-            var genPassType = terrariaAsm.GetType("Terraria.WorldBuilding.GenPass");
+            var genPassType = typeof(Main).Assembly.GetType("Terraria.WorldBuilding.GenPass");
             if (genPassType == null)
             {
                 _log.Error("[SeedLab] WorldGenPassPatch: Could not find Terraria.WorldBuilding.GenPass");
@@ -70,7 +69,7 @@ namespace SeedLab.Patches
             }
 
             // Cache Main.* fields for all special seeds
-            var mainType = terrariaAsm.GetType("Terraria.Main");
+            var mainType = typeof(Main);
             foreach (var seed in WorldGenFeatureCatalog.Seeds)
             {
                 if (seed.Kind != SeedKind.SpecialSeed) continue;
@@ -78,8 +77,7 @@ namespace SeedLab.Patches
             }
 
             // Cache WorldGen.* alias fields
-            var worldGenType = terrariaAsm.GetType("Terraria.WorldGen");
-            if (worldGenType != null)
+            var worldGenType = typeof(WorldGen);
             {
                 foreach (var kvp in WorldGenFeatureCatalog.MainToWorldGenAlias)
                 {
@@ -90,7 +88,7 @@ namespace SeedLab.Patches
             }
 
             // Cache SecretSeed fields for secret seeds
-            _secretSeedType = worldGenType?.GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
+            _secretSeedType = typeof(WorldGen).GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
             if (_secretSeedType != null)
             {
                 _ssEnabledField = _secretSeedType.GetField("_enabled", BindingFlags.NonPublic | BindingFlags.Instance);

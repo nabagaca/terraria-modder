@@ -1,16 +1,17 @@
 {
   "id": "auto-buffs",
   "name": "Auto Furniture Buffs",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "framework_version": ">=0.2.0",
   "author": "Inidar",
-  "description": "Automatically applies buffs from nearby furniture (Crystal Ball, Bewitching Table, etc.)",
+  "description": "Automatically applies buffs from nearby buff stations (Crystal Ball, Bewitching Table, Ammo Box, Sharpening Station, War Table, Slice of Cake).",
   "entry_dll": "AutoBuffs.dll",
   "config_schema": {
     "enabled": {
       "type": "bool",
       "default": true,
       "label": "Enabled",
-      "description": "Automatically apply buffs from nearby furniture like Crystal Ball, Bewitching Table, Ammo Box, and Sharpening Station."
+      "description": "Automatically apply buffs from nearby buff stations: Crystal Ball, Bewitching Table, Ammo Box, Sharpening Station, War Table, and Slice of Cake."
     },
     "scanRadius": {
       "type": "int",

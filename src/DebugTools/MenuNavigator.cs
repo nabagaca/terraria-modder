@@ -1,12 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
 using System.Threading;
 using Terraria;
 using Terraria.IO;
 using TerrariaModder.Core.Logging;
-using TerrariaModder.Core.Reflection;
 
 namespace DebugTools
 {
@@ -14,16 +12,10 @@ namespace DebugTools
     /// Programmatic menu navigation for automating the title screen → world entry flow.
     /// Uses direct state manipulation (same approach as Terraria's own QuickLoad testing class)
     /// rather than simulated mouse clicks, for maximum reliability.
-    ///
-    /// Method calls on Main use reflection to avoid XNA assembly dependency.
     /// </summary>
     public sealed class MenuNavigator
     {
         private readonly ILogger _log;
-        private static readonly object _reflectionLock = new object();
-        private static MethodInfo _playWorldMethod;
-        private static MethodInfo _loadPlayersMethod;
-        private static MethodInfo _selectPlayerMethod;
 
         /// <summary>Maximum allowed timeout for any blocking operation (2 minutes).</summary>
         private const int MaxTimeoutMs = 120_000;
@@ -52,7 +44,7 @@ namespace DebugTools
 
             if (state.InWorld)
             {
-                state.WorldName = GameAccessor.TryGetMainField<string>("worldName", "");
+                state.WorldName = Main.worldName ?? "";
             }
 
             if (state.InMenu)
@@ -163,7 +155,7 @@ namespace DebugTools
             // Already in world?
             if (!Main.gameMenu)
             {
-                string currentWorld = GameAccessor.TryGetMainField<string>("worldName", "");
+                string currentWorld = Main.worldName ?? "";
                 return NavigationResult.Ok($"Already in world: {currentWorld}");
             }
 
@@ -188,7 +180,7 @@ namespace DebugTools
             // Step 1: Load players and select character
             try
             {
-                CallLoadPlayers();
+                Main.LoadPlayers();
             }
             catch (Exception ex)
             {
@@ -219,7 +211,7 @@ namespace DebugTools
 
             try
             {
-                CallSelectPlayer(playerData);
+                Main.SelectPlayer(playerData);
             }
             catch (Exception ex)
             {
@@ -258,7 +250,7 @@ namespace DebugTools
             // Step 3: Start world loading (same as Terraria's QuickLoad)
             try
             {
-                CallPlayWorld();
+                WorldGen.playWorld();
                 Main.menuMode = 10; // loading screen
             }
             catch (Exception ex)
@@ -363,7 +355,7 @@ namespace DebugTools
 
             try
             {
-                CallLoadPlayers();
+                Main.LoadPlayers();
                 Main.menuMode = 1;
                 return NavigationResult.Ok("Navigated to singleplayer/character select");
             }
@@ -386,7 +378,7 @@ namespace DebugTools
             {
                 try
                 {
-                    CallLoadPlayers();
+                    Main.LoadPlayers();
                 }
                 catch (Exception ex)
                 {
@@ -414,7 +406,7 @@ namespace DebugTools
 
             try
             {
-                CallSelectPlayer(playerData);
+                Main.SelectPlayer(playerData);
                 string name = playerData.Player?.name ?? "Unknown";
                 return NavigationResult.Ok($"Selected character: {name} (index {index})");
             }
@@ -459,7 +451,7 @@ namespace DebugTools
 
             try
             {
-                CallPlayWorld();
+                WorldGen.playWorld();
                 Main.menuMode = 10;
                 return NavigationResult.Ok($"Loading world: {Main.ActiveWorldFileData.Name}");
             }
@@ -467,60 +459,6 @@ namespace DebugTools
             {
                 return NavigationResult.Fail($"Failed to play world: {ex.Message}");
             }
-        }
-
-        #endregion
-
-        #region Reflection Wrappers
-
-        private static void CallLoadPlayers()
-        {
-            lock (_reflectionLock)
-            {
-                if (_loadPlayersMethod == null)
-                {
-                    _loadPlayersMethod = TypeFinder.Main.GetMethod("LoadPlayers",
-                        BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
-                    if (_loadPlayersMethod == null)
-                        throw new InvalidOperationException("Could not find Main.LoadPlayers() method");
-                }
-            }
-            _loadPlayersMethod.Invoke(null, null);
-        }
-
-        private static void CallSelectPlayer(PlayerFileData data)
-        {
-            lock (_reflectionLock)
-            {
-                if (_selectPlayerMethod == null)
-                {
-                    _selectPlayerMethod = TypeFinder.Main.GetMethod("SelectPlayer",
-                        BindingFlags.Public | BindingFlags.Static, null,
-                        new[] { typeof(PlayerFileData) }, null);
-                    if (_selectPlayerMethod == null)
-                        throw new InvalidOperationException("Could not find Main.SelectPlayer() method");
-                }
-            }
-            _selectPlayerMethod.Invoke(null, new object[] { data });
-        }
-
-        private static void CallPlayWorld()
-        {
-            lock (_reflectionLock)
-            {
-                if (_playWorldMethod == null)
-                {
-                    var worldGenType = TypeFinder.WorldGen;
-                    if (worldGenType == null)
-                        throw new InvalidOperationException("Could not find Terraria.WorldGen type");
-
-                    _playWorldMethod = worldGenType.GetMethod("playWorld",
-                        BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
-                    if (_playWorldMethod == null)
-                        throw new InvalidOperationException("Could not find WorldGen.playWorld() method");
-                }
-            }
-            _playWorldMethod.Invoke(null, null);
         }
 
         #endregion

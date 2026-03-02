@@ -1,6 +1,10 @@
 using System;
 using System.Reflection;
 using System.Reflection.Emit;
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
+using Terraria;
+using Terraria.GameInput;
 using TerrariaModder.Core.Logging;
 
 namespace FpsUnlocked
@@ -36,14 +40,10 @@ namespace FpsUnlocked
         // --- Timing fields ---
         public static FieldInfo UpdateTimeAccumulator; // Main.UpdateTimeAccumulator (public static double)
         public static FieldInfo FrameSkipModeField;    // Main.FrameSkipMode
-        public static FieldInfo GamePausedField;       // Main.gamePaused
-        public static FieldInfo GameMenuField;         // Main.gameMenu
         public static PropertyInfo IsFixedTimeStepProp;
         public static PropertyInfo TargetElapsedTimeProp;
-        public static FieldInfo GraphicsField;         // Main.graphics
         public static PropertyInfo VSyncProp;          // GraphicsDeviceManager.SynchronizeWithVerticalRetrace
         public static MethodInfo ApplyChangesMethod;
-        public static object FrameSkipOff;             // FrameSkipMode.Off (enum value 0)
 
         // --- Entity field accessors (IL-emitted for speed) ---
         // Player
@@ -125,12 +125,6 @@ namespace FpsUnlocked
         public static Func<object, int> EntityWhoAmI;
 
         // Mouse polling (for per-frame cursor updates)
-        public static MethodInfo MouseGetState;       // Mouse.GetState() → MouseState
-        public static PropertyInfo MouseStateXProp;    // MouseState.X
-        public static PropertyInfo MouseStateYProp;    // MouseState.Y
-        public static FieldInfo MainMouseX;            // Main.mouseX (public static int)
-        public static FieldInfo MainMouseY;            // Main.mouseY (public static int)
-        public static FieldInfo RawMouseScaleField;    // PlayerInput.RawMouseScale (Vector2)
         public static FieldInfo Vec2XField;            // Vector2.X (cached for RawMouseScale)
         public static FieldInfo Vec2YField;            // Vector2.Y
 
@@ -150,32 +144,19 @@ namespace FpsUnlocked
         {
             try
             {
-                MainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
+                // Direct type references (no reflection needed)
+                MainType = typeof(Main);
+                PlayerType = typeof(Player);
+                NPCType = typeof(NPC);
+                ProjectileType = typeof(Projectile);
+                DustType = typeof(Dust);
+                GoreType = typeof(Gore);
+                WorldItemType = typeof(WorldItem);
+                CombatTextType = typeof(CombatText);
+                PopupTextType = typeof(PopupText);
+                Vector2Type = typeof(Vector2);
 
-                if (MainType == null)
-                {
-                    log.Error("Could not find Terraria.Main");
-                    return false;
-                }
-
-                // Load all entity types
-                var asm = MainType.Assembly;
-                PlayerType = asm.GetType("Terraria.Player");
-                NPCType = asm.GetType("Terraria.NPC");
-                ProjectileType = asm.GetType("Terraria.Projectile");
-                DustType = asm.GetType("Terraria.Dust");
-                GoreType = asm.GetType("Terraria.Gore");
-                WorldItemType = asm.GetType("Terraria.WorldItem");
-                CombatTextType = asm.GetType("Terraria.CombatText");
-                PopupTextType = asm.GetType("Terraria.PopupText");
-
-                // Get Vector2 type from Entity.position field
-                var entityType = asm.GetType("Terraria.Entity");
-                var posField = entityType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
-                Vector2Type = posField.FieldType;
-
-                // Entity arrays on Main
+                // Entity arrays on Main (FieldInfo needed for GetEntityArray helper)
                 MainPlayerField = MainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
                 MainNpcField = MainType.GetField("npc", BindingFlags.Public | BindingFlags.Static);
                 MainProjectileField = MainType.GetField("projectile", BindingFlags.Public | BindingFlags.Static);
@@ -185,81 +166,42 @@ namespace FpsUnlocked
                 MainCombatTextField = MainType.GetField("combatText", BindingFlags.Public | BindingFlags.Static);
                 MainPopupTextField = MainType.GetField("popupText", BindingFlags.Public | BindingFlags.Static);
 
-                // Timing
+                // Timing (FieldInfo needed for GetValue/SetValue in Patches — enum boxing)
                 UpdateTimeAccumulator = MainType.GetField("UpdateTimeAccumulator",
                     BindingFlags.Public | BindingFlags.Static);
                 FrameSkipModeField = MainType.GetField("FrameSkipMode",
                     BindingFlags.Public | BindingFlags.Static);
-                GamePausedField = MainType.GetField("gamePaused",
-                    BindingFlags.Public | BindingFlags.Static);
-                GameMenuField = MainType.GetField("gameMenu",
-                    BindingFlags.Public | BindingFlags.Static);
 
-                if (FrameSkipModeField != null)
-                    FrameSkipOff = Enum.ToObject(FrameSkipModeField.FieldType, 0);
-
-                // XNA Game properties
-                var gameType = MainType.BaseType;
-                IsFixedTimeStepProp = gameType?.GetProperty("IsFixedTimeStep",
+                // XNA Game properties (PropertyInfo needed for SetValue on base class)
+                var gameType = typeof(Microsoft.Xna.Framework.Game);
+                IsFixedTimeStepProp = gameType.GetProperty("IsFixedTimeStep",
                     BindingFlags.Public | BindingFlags.Instance);
-                TargetElapsedTimeProp = gameType?.GetProperty("TargetElapsedTime",
+                TargetElapsedTimeProp = gameType.GetProperty("TargetElapsedTime",
                     BindingFlags.Public | BindingFlags.Instance);
 
-                // Graphics device manager
-                GraphicsField = MainType.GetField("graphics",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (GraphicsField != null)
+                // Graphics device manager (PropertyInfo/MethodInfo for VSync control)
+                var gdm = Main.graphics;
+                if (gdm != null)
                 {
-                    var gdm = GraphicsField.GetValue(null);
-                    if (gdm != null)
-                    {
-                        var gdmType = gdm.GetType();
-                        VSyncProp = gdmType.GetProperty("SynchronizeWithVerticalRetrace",
-                            BindingFlags.Public | BindingFlags.Instance);
-                        ApplyChangesMethod = gdmType.GetMethod("ApplyChanges",
-                            BindingFlags.Public | BindingFlags.Instance);
-                    }
+                    var gdmType = gdm.GetType();
+                    VSyncProp = gdmType.GetProperty("SynchronizeWithVerticalRetrace",
+                        BindingFlags.Public | BindingFlags.Instance);
+                    ApplyChangesMethod = gdmType.GetMethod("ApplyChanges",
+                        BindingFlags.Public | BindingFlags.Instance);
                 }
 
-                // Max entity counts from Main (use reflection for accuracy)
-                var maxNpcsField = MainType.GetField("maxNPCs", BindingFlags.Public | BindingFlags.Static);
-                if (maxNpcsField != null)
-                    MaxNpcs = (int)maxNpcsField.GetValue(null);
+                // Max entity counts from Main
+                if (Main.maxNPCs > 0)
+                    MaxNpcs = Main.maxNPCs;
 
-                // Projectile trail arrays
+                // Projectile trail arrays (FieldInfo needed for GetValue on instance)
                 ProjOldPosField = ProjectileType.GetField("oldPos", BindingFlags.Public | BindingFlags.Instance);
                 ProjOldRotField = ProjectileType.GetField("oldRot", BindingFlags.Public | BindingFlags.Instance);
 
-                // Player shadow trail
+                // Player shadow trail (FieldInfo needed for GetValue on instance)
                 PlayerShadowPosField = PlayerType.GetField("shadowPos", BindingFlags.Public | BindingFlags.Instance);
 
-                // Mouse polling setup
-                MainMouseX = MainType.GetField("mouseX", BindingFlags.Public | BindingFlags.Static);
-                MainMouseY = MainType.GetField("mouseY", BindingFlags.Public | BindingFlags.Static);
-
-                var playerInputType = asm.GetType("Terraria.GameInput.PlayerInput");
-                if (playerInputType != null)
-                {
-                    RawMouseScaleField = playerInputType.GetField("RawMouseScale",
-                        BindingFlags.Public | BindingFlags.Static);
-
-                    // Get Mouse.GetState() from the MouseInfo field's type assembly
-                    var mouseInfoField = playerInputType.GetField("MouseInfo",
-                        BindingFlags.Public | BindingFlags.Static);
-                    if (mouseInfoField != null)
-                    {
-                        var mouseStateType = mouseInfoField.FieldType;
-                        MouseStateXProp = mouseStateType.GetProperty("X");
-                        MouseStateYProp = mouseStateType.GetProperty("Y");
-
-                        var mouseType = mouseStateType.Assembly.GetType(
-                            "Microsoft.Xna.Framework.Input.Mouse");
-                        if (mouseType != null)
-                            MouseGetState = mouseType.GetMethod("GetState",
-                                BindingFlags.Public | BindingFlags.Static);
-                    }
-                }
-
+                // Vector2 field references (needed for shadowPos/trail manipulation)
                 Vec2XField = Vector2Type.GetField("X", BindingFlags.Public | BindingFlags.Instance);
                 Vec2YField = Vector2Type.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
 
@@ -285,7 +227,7 @@ namespace FpsUnlocked
             var vec2X = Vector2Type.GetField("X", BindingFlags.Public | BindingFlags.Instance);
             var vec2Y = Vector2Type.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
 
-            var entityType = MainType.Assembly.GetType("Terraria.Entity");
+            var entityType = typeof(Entity);
             var entityPos = entityType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
             var entityVel = entityType.GetField("velocity", BindingFlags.Public | BindingFlags.Instance);
 
@@ -380,7 +322,7 @@ namespace FpsUnlocked
             DustCustomData = MakeObjectGetter(DustType,
                 DustType.GetField("customData", BindingFlags.Public | BindingFlags.Instance), "DustCustomData");
 
-            // --- Entity.whoAmI (used for dust customData → entity index lookup) ---
+            // --- Entity.whoAmI (used for dust customData -> entity index lookup) ---
             var entityWhoAmI = entityType.GetField("whoAmI", BindingFlags.Public | BindingFlags.Instance);
             EntityWhoAmI = MakeIntGetter(entityType, entityWhoAmI, "EntityWhoAmI");
 
@@ -444,7 +386,7 @@ namespace FpsUnlocked
 
         /// <summary>
         /// Creates a getter for structField.component (e.g., entity.position.X).
-        /// IL: ldarg.0 → castclass → ldflda structField → ldfld component → ret
+        /// IL: ldarg.0 -> castclass -> ldflda structField -> ldfld component -> ret
         /// </summary>
         private static Func<object, float> MakeVec2FieldGetter(
             Type ownerType, FieldInfo structField, FieldInfo component, string name)
@@ -462,7 +404,7 @@ namespace FpsUnlocked
 
         /// <summary>
         /// Creates a setter for structField.component (e.g., entity.position.X = value).
-        /// IL: ldarg.0 → castclass → ldflda structField → ldarg.1 → stfld component → ret
+        /// IL: ldarg.0 -> castclass -> ldflda structField -> ldarg.1 -> stfld component -> ret
         /// </summary>
         private static Action<object, float> MakeVec2FieldSetter(
             Type ownerType, FieldInfo structField, FieldInfo component, string name)

@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace SeedLab.Patches
@@ -22,7 +23,8 @@ namespace SeedLab.Patches
 
         // Saved flag state per patched method (each method gets its own set to handle nesting)
         // Tracking booleans ensure postfix only restores if prefix actually overrode
-        // NPC.SetDefaults
+        // NPC.SetDefaults — uses depth counter to handle recursive calls (SetDefaults can call itself)
+        private static int _sd_depth;
         private static bool _sd_active, _sd_getGood, _sd_zenith, _sd_tenth;
         // NPC.AI
         private static bool _ai_active, _ai_getGood, _ai_notBees, _ai_noTraps;
@@ -34,6 +36,17 @@ namespace SeedLab.Patches
         private static bool _snpc_active, _snpc_getGood, _snpc_notBees, _snpc_remix, _snpc_drunk, _snpc_dontStarve, _snpc_tenth;
         // Player.UpdateBuffs
         private static bool _ub_active, _ub_dontStarve;
+        // WorldGen.ShakeTree — getGoodWorld, tenthAnniversaryWorld
+        private static bool _st_active, _st_getGood, _st_tenth;
+        // Projectile.SetDefaults — getGoodWorld (uses depth counter for recursive calls)
+        private static int _psd_depth;
+        private static bool _psd_active, _psd_getGood;
+        // Projectile.AI — getGoodWorld
+        private static bool _pai_active, _pai_getGood;
+        // Player.PickTile_DetermineDamage — getGoodWorld
+        private static bool _pt_active, _pt_getGood;
+        // Projectile.FishingCheck — remixWorld
+        private static bool _fc_active, _fc_remix;
 
         public static void Apply(Harmony harmony, FeatureManager manager, ILogger log)
         {
@@ -41,15 +54,15 @@ namespace SeedLab.Patches
             _manager = manager;
             _log = log;
 
-            var terrariaAsm = Assembly.Load("Terraria");
-            var npcType = terrariaAsm.GetType("Terraria.NPC");
-            var playerType = terrariaAsm.GetType("Terraria.Player");
-            var spawnerType = npcType?.GetNestedType("Spawner", BindingFlags.Public | BindingFlags.NonPublic);
+            var npcType = typeof(NPC);
+            var playerType = typeof(Player);
+            var projectileType = typeof(Projectile);
+            var worldGenType = typeof(WorldGen);
+            var spawnerType = npcType.GetNestedType("Spawner", BindingFlags.Public | BindingFlags.NonPublic);
 
             int patched = 0;
 
             // 1. NPC.SetDefaults(int, NPCSpawnParams)
-            if (npcType != null)
             {
                 var setDefaults = FindMethod(npcType, "SetDefaults", BindingFlags.Public | BindingFlags.Instance, "Int32");
                 if (setDefaults != null)
@@ -60,7 +73,6 @@ namespace SeedLab.Patches
             }
 
             // 2. NPC.AI()
-            if (npcType != null)
             {
                 var ai = npcType.GetMethod("AI", BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
                 if (ai != null)
@@ -71,7 +83,6 @@ namespace SeedLab.Patches
             }
 
             // 3. NPC.ScaleStats_ByDifficulty_Tweaks()
-            if (npcType != null)
             {
                 var scaleTweaks = npcType.GetMethod("ScaleStats_ByDifficulty_Tweaks",
                     BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
@@ -107,13 +118,66 @@ namespace SeedLab.Patches
             }
 
             // 6. Player.UpdateBuffs(int)
-            if (playerType != null)
             {
                 var updateBuffs = playerType.GetMethod("UpdateBuffs",
                     BindingFlags.Public | BindingFlags.Instance);
                 if (updateBuffs != null)
                 {
                     PatchMethod(updateBuffs, nameof(UpdateBuffs_Prefix), nameof(UpdateBuffs_Postfix));
+                    patched++;
+                }
+            }
+
+            // 7. WorldGen.ShakeTree (private static, no params)
+            {
+                var shakeTree = worldGenType.GetMethod("ShakeTree",
+                    BindingFlags.NonPublic | BindingFlags.Static, null, Type.EmptyTypes, null);
+                if (shakeTree != null)
+                {
+                    PatchMethod(shakeTree, nameof(ShakeTree_Prefix), nameof(ShakeTree_Postfix));
+                    patched++;
+                }
+            }
+
+            // 8. Projectile.SetDefaults(int)
+            {
+                var projSetDefaults = FindMethod(projectileType, "SetDefaults", BindingFlags.Public | BindingFlags.Instance, "Int32");
+                if (projSetDefaults != null)
+                {
+                    PatchMethod(projSetDefaults, nameof(ProjSetDefaults_Prefix), nameof(ProjSetDefaults_Postfix));
+                    patched++;
+                }
+            }
+
+            // 9. Projectile.AI()
+            {
+                var projAI = projectileType.GetMethod("AI",
+                    BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (projAI != null)
+                {
+                    PatchMethod(projAI, nameof(ProjAI_Prefix), nameof(ProjAI_Postfix));
+                    patched++;
+                }
+            }
+
+            // 10. Player.PickTile_DetermineDamage
+            {
+                var pickTile = playerType.GetMethod("PickTile_DetermineDamage",
+                    BindingFlags.Public | BindingFlags.Instance);
+                if (pickTile != null)
+                {
+                    PatchMethod(pickTile, nameof(PickTile_Prefix), nameof(PickTile_Postfix));
+                    patched++;
+                }
+            }
+
+            // 11. Projectile.FishingCheck()
+            {
+                var fishingCheck = projectileType.GetMethod("FishingCheck",
+                    BindingFlags.Public | BindingFlags.Instance, null, Type.EmptyTypes, null);
+                if (fishingCheck != null)
+                {
+                    PatchMethod(fishingCheck, nameof(FishingCheck_Prefix), nameof(FishingCheck_Postfix));
                     patched++;
                 }
             }
@@ -153,12 +217,15 @@ namespace SeedLab.Patches
         }
 
         #region NPC.SetDefaults — getGoodWorld, zenithWorld, tenthAnniversaryWorld
+        // Uses depth counter: SetDefaults can call itself recursively (e.g. NPC transforms).
+        // Only save/override on outermost call, only restore when depth returns to 0.
 
         private static void SetDefaults_Prefix()
         {
+            _sd_depth++;
+            if (_sd_depth > 1) return; // Recursive call — flags already overridden
             _sd_active = false;
             if (_manager == null || !_manager.Initialized) return;
-            // Fast path: if none of our flags need per-method overrides, skip entirely
             if (!_manager.NeedsMixedOverride(SeedFeatures.GetGoodWorld) &&
                 !_manager.NeedsMixedOverride(SeedFeatures.ZenithWorld) &&
                 !_manager.NeedsMixedOverride(SeedFeatures.TenthAnniversaryWorld))
@@ -182,6 +249,8 @@ namespace SeedLab.Patches
 
         private static void SetDefaults_Postfix()
         {
+            _sd_depth--;
+            if (_sd_depth > 0) return; // Still inside recursive call
             if (!_sd_active) return;
             _sd_active = false;
             try
@@ -391,6 +460,171 @@ namespace SeedLab.Patches
             try
             {
                 FeatureManager.SetFlag(SeedFeatures.DontStarveWorld, _ub_dontStarve);
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region WorldGen.ShakeTree — getGoodWorld, tenthAnniversaryWorld
+
+        private static void ShakeTree_Prefix()
+        {
+            _st_active = false;
+            if (_manager == null || !_manager.Initialized) return;
+            if (!_manager.NeedsMixedOverride(SeedFeatures.GetGoodWorld) &&
+                !_manager.NeedsMixedOverride(SeedFeatures.TenthAnniversaryWorld))
+                return;
+            try
+            {
+                _st_getGood = FeatureManager.GetFlag(SeedFeatures.GetGoodWorld);
+                _st_tenth = FeatureManager.GetFlag(SeedFeatures.TenthAnniversaryWorld);
+                _st_active = true;
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_WorldGen_ShakeTree, SeedFeatures.GetGoodWorld));
+                FeatureManager.SetFlag(SeedFeatures.TenthAnniversaryWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_WorldGen_ShakeTree, SeedFeatures.TenthAnniversaryWorld));
+            }
+            catch { _st_active = false; }
+        }
+
+        private static void ShakeTree_Postfix()
+        {
+            if (!_st_active) return;
+            _st_active = false;
+            try
+            {
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld, _st_getGood);
+                FeatureManager.SetFlag(SeedFeatures.TenthAnniversaryWorld, _st_tenth);
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Projectile.SetDefaults — getGoodWorld
+        // Uses depth counter for recursive calls (SetDefaults may trigger nested calls)
+
+        private static void ProjSetDefaults_Prefix()
+        {
+            _psd_depth++;
+            if (_psd_depth > 1) return;
+            _psd_active = false;
+            if (_manager == null || !_manager.Initialized) return;
+            if (!_manager.NeedsMixedOverride(SeedFeatures.GetGoodWorld))
+                return;
+            try
+            {
+                _psd_getGood = FeatureManager.GetFlag(SeedFeatures.GetGoodWorld);
+                _psd_active = true;
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_Projectile_SetDefaults, SeedFeatures.GetGoodWorld));
+            }
+            catch { _psd_active = false; }
+        }
+
+        private static void ProjSetDefaults_Postfix()
+        {
+            _psd_depth--;
+            if (_psd_depth > 0) return;
+            if (!_psd_active) return;
+            _psd_active = false;
+            try
+            {
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld, _psd_getGood);
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Projectile.AI — getGoodWorld
+
+        private static void ProjAI_Prefix()
+        {
+            _pai_active = false;
+            if (_manager == null || !_manager.Initialized) return;
+            if (!_manager.NeedsMixedOverride(SeedFeatures.GetGoodWorld))
+                return;
+            try
+            {
+                _pai_getGood = FeatureManager.GetFlag(SeedFeatures.GetGoodWorld);
+                _pai_active = true;
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_Projectile_AI, SeedFeatures.GetGoodWorld));
+            }
+            catch { _pai_active = false; }
+        }
+
+        private static void ProjAI_Postfix()
+        {
+            if (!_pai_active) return;
+            _pai_active = false;
+            try
+            {
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld, _pai_getGood);
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Player.PickTile_DetermineDamage — getGoodWorld
+
+        private static void PickTile_Prefix()
+        {
+            _pt_active = false;
+            if (_manager == null || !_manager.Initialized) return;
+            if (!_manager.NeedsMixedOverride(SeedFeatures.GetGoodWorld))
+                return;
+            try
+            {
+                _pt_getGood = FeatureManager.GetFlag(SeedFeatures.GetGoodWorld);
+                _pt_active = true;
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_Player_PickTile, SeedFeatures.GetGoodWorld));
+            }
+            catch { _pt_active = false; }
+        }
+
+        private static void PickTile_Postfix()
+        {
+            if (!_pt_active) return;
+            _pt_active = false;
+            try
+            {
+                FeatureManager.SetFlag(SeedFeatures.GetGoodWorld, _pt_getGood);
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Projectile.FishingCheck — remixWorld
+
+        private static void FishingCheck_Prefix()
+        {
+            _fc_active = false;
+            if (_manager == null || !_manager.Initialized) return;
+            if (!_manager.NeedsMixedOverride(SeedFeatures.RemixWorld))
+                return;
+            try
+            {
+                _fc_remix = FeatureManager.GetFlag(SeedFeatures.RemixWorld);
+                _fc_active = true;
+                FeatureManager.SetFlag(SeedFeatures.RemixWorld,
+                    _manager.GetFlagForTarget(SeedFeatures.Target_Projectile_FishingCheck, SeedFeatures.RemixWorld));
+            }
+            catch { _fc_active = false; }
+        }
+
+        private static void FishingCheck_Postfix()
+        {
+            if (!_fc_active) return;
+            _fc_active = false;
+            try
+            {
+                FeatureManager.SetFlag(SeedFeatures.RemixWorld, _fc_remix);
             }
             catch { }
         }

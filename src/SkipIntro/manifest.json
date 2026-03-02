@@ -1,7 +1,8 @@
 {
   "id": "skip-intro",
   "name": "Skip Intro",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "framework_version": ">=0.2.0",
   "author": "Inidar",
   "description": "Skips the ReLogic intro splash screen on startup",
   "entry_dll": "SkipIntro.dll",

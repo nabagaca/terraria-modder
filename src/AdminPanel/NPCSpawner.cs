@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
+using Microsoft.Xna.Framework;
+using Terraria;
+using Terraria.DataStructures;
+using Terraria.ID;
 using TerrariaModder.Core.Input;
 using TerrariaModder.Core.Logging;
 using TerrariaModder.Core.UI;
@@ -55,125 +58,10 @@ namespace AdminPanel
         private const int SectionCritter = -2;
         private const int SectionEnemy = -3;
 
-        #region Reflection Cache
-
-        private static Type _npcType;
-        private static Type _mainType;
-        private static Type _langType;
-        private static Type _contentSamplesType;
-        private static Type _entitySourceType;
-        private static Type _vector2Type;
-
-        // NPC fields
-        private static FieldInfo _npcBossField;
-        private static FieldInfo _npcTownNPCField;
-        private static FieldInfo _npcCatchItemField;
-        private static FieldInfo _npcTypeField;
-        private static FieldInfo _npcTimeLeftField;
-        private static FieldInfo _npcActiveField;
-
-        // Main fields
-        private static FieldInfo _mainNpcField;
-        private static FieldInfo _mainMyPlayerField;
-        private static FieldInfo _mainPlayerArrayField;
-        private static FieldInfo _mainMouseXField;
-        private static FieldInfo _mainMouseYField;
-        private static FieldInfo _mainScreenPositionField;
-        private static FieldInfo _mainGameMenuField;
-
-        // Vector2 fields
-        private static FieldInfo _vector2XField;
-        private static FieldInfo _vector2YField;
-
-        // Player fields
-        private static PropertyInfo _playerCenterProp;
-
-        // Methods
-        private static MethodInfo _langGetNPCNameValue;
-        private static MethodInfo _npcNewNPC;
-
-        // ContentSamples
-        private static FieldInfo _npcsByNetIdField;
-
-        // NPCID
-        private static FieldInfo _npcidCountField;
-
-        // NPCID.Sets
-        private static FieldInfo _shouldBeCountedAsBossField;
-        private static FieldInfo _townCritterField;
-
-        #endregion
-
-        public static void Init(ILogger log, Type mainType, Type playerType, Type vector2Type,
-            FieldInfo vector2XField, FieldInfo vector2YField,
-            FieldInfo myPlayerField, FieldInfo playerArrayField,
-            PropertyInfo playerCenterProp)
+        public static void Init(ILogger log)
         {
             _log = log;
-            _mainType = mainType;
-            _vector2Type = vector2Type;
-            _vector2XField = vector2XField;
-            _vector2YField = vector2YField;
-            _mainMyPlayerField = myPlayerField;
-            _mainPlayerArrayField = playerArrayField;
-            _playerCenterProp = playerCenterProp;
-
-            try
-            {
-                var asm = mainType.Assembly;
-                _npcType = asm.GetType("Terraria.NPC");
-                _langType = asm.GetType("Terraria.Lang");
-                _contentSamplesType = asm.GetType("Terraria.ID.ContentSamples");
-                var npcidType = asm.GetType("Terraria.ID.NPCID");
-                var npcidSetsType = npcidType?.GetNestedType("Sets", BindingFlags.Public);
-
-                // EntitySource
-                _entitySourceType = asm.GetType("Terraria.DataStructures.EntitySource_SpawnNPC");
-
-                // NPC fields
-                if (_npcType != null)
-                {
-                    _npcBossField = _npcType.GetField("boss", BindingFlags.Public | BindingFlags.Instance);
-                    _npcTownNPCField = _npcType.GetField("townNPC", BindingFlags.Public | BindingFlags.Instance);
-                    _npcCatchItemField = _npcType.GetField("catchItem", BindingFlags.Public | BindingFlags.Instance);
-                    _npcTypeField = _npcType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
-                    _npcTimeLeftField = _npcType.GetField("timeLeft", BindingFlags.Public | BindingFlags.Instance);
-                    _npcActiveField = _npcType.GetField("active", BindingFlags.Public | BindingFlags.Instance);
-                    _npcNewNPC = _npcType.GetMethod("NewNPC", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                // Main fields
-                _mainNpcField = mainType.GetField("npc", BindingFlags.Public | BindingFlags.Static);
-                _mainMouseXField = mainType.GetField("mouseX", BindingFlags.Public | BindingFlags.Static);
-                _mainMouseYField = mainType.GetField("mouseY", BindingFlags.Public | BindingFlags.Static);
-                _mainScreenPositionField = mainType.GetField("screenPosition", BindingFlags.Public | BindingFlags.Static);
-                _mainGameMenuField = mainType.GetField("gameMenu", BindingFlags.Public | BindingFlags.Static);
-
-                // Lang
-                if (_langType != null)
-                    _langGetNPCNameValue = _langType.GetMethod("GetNPCNameValue", BindingFlags.Public | BindingFlags.Static);
-
-                // ContentSamples
-                if (_contentSamplesType != null)
-                    _npcsByNetIdField = _contentSamplesType.GetField("NpcsByNetId", BindingFlags.Public | BindingFlags.Static);
-
-                // NPCID.Count
-                if (npcidType != null)
-                    _npcidCountField = npcidType.GetField("Count", BindingFlags.Public | BindingFlags.Static);
-
-                // NPCID.Sets
-                if (npcidSetsType != null)
-                {
-                    _shouldBeCountedAsBossField = npcidSetsType.GetField("ShouldBeCountedAsBossForBestiary", BindingFlags.Public | BindingFlags.Static);
-                    _townCritterField = npcidSetsType.GetField("TownCritter", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                _log.Debug("NPCSpawner reflection initialized");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"NPCSpawner init error: {ex.Message}");
-            }
+            _log.Debug("NPCSpawner initialized");
         }
 
         public static void LoadFavourites(string bossFavs, string npcFavs)
@@ -218,7 +106,7 @@ namespace AdminPanel
             }
 
             // Right-click spawn: works even when panel is closed
-            if (_rightClickSpawn && _selectedId > 0 && !IsGameMenu())
+            if (_rightClickSpawn && _selectedId > 0 && !Main.gameMenu)
             {
                 if (InputState.IsKeyJustPressed(KeyCode.MouseRight) && !UIRenderer.IsMouseOverAnyPanel())
                 {
@@ -443,69 +331,33 @@ namespace AdminPanel
             _critters.Clear();
             _enemies.Clear();
 
-            if (_langGetNPCNameValue == null || _npcidCountField == null)
-            {
-                _log?.Info("NPCSpawner: Missing reflection for catalog building");
-                return;
-            }
-
             try
             {
-                int count = Convert.ToInt32(_npcidCountField.GetValue(null));
+                int count = NPCID.Count;
 
-                // Try to use ContentSamples for categorization
-                Dictionary<int, object> npcSamples = null;
-                if (_npcsByNetIdField != null)
-                {
-                    var rawDict = _npcsByNetIdField.GetValue(null);
-                    if (rawDict != null)
-                    {
-                        // It's Dictionary<int, NPC> - use reflection to iterate
-                        var dictType = rawDict.GetType();
-                        var keysProperty = dictType.GetProperty("Keys");
-                        var indexer = dictType.GetProperty("Item");
-                        if (keysProperty != null && indexer != null)
-                        {
-                            npcSamples = new Dictionary<int, object>();
-                            var keys = keysProperty.GetValue(rawDict) as System.Collections.IEnumerable;
-                            if (keys != null)
-                            {
-                                foreach (var key in keys)
-                                {
-                                    int k = (int)key;
-                                    if (k >= 1 && k < count)
-                                    {
-                                        try
-                                        {
-                                            var npc = indexer.GetValue(rawDict, new object[] { key });
-                                            if (npc != null)
-                                                npcSamples[k] = npc;
-                                        }
-                                        catch { }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Get Sets arrays for additional categorization
-                bool[] shouldBeCountedAsBoss = _shouldBeCountedAsBossField?.GetValue(null) as bool[];
-                bool[] townCritter = _townCritterField?.GetValue(null) as bool[];
+                // Get Sets arrays for categorization
+                bool[] shouldBeCountedAsBoss = NPCID.Sets.ShouldBeCountedAsBossForBestiary;
+                bool[] townCritter = NPCID.Sets.TownCritter;
 
                 for (int i = 1; i < count; i++)
                 {
                     string name;
                     try
                     {
-                        name = (string)_langGetNPCNameValue.Invoke(null, new object[] { i });
+                        name = Lang.GetNPCNameValue(i);
                     }
                     catch { continue; }
 
                     if (string.IsNullOrEmpty(name) || name.Trim().Length == 0) continue;
 
                     var entry = new CatalogEntry { Id = i, Name = name };
-                    Category category = CategorizeNPC(i, npcSamples, shouldBeCountedAsBoss, townCritter);
+
+                    // Categorize using ContentSamples
+                    NPC sampleNpc = null;
+                    if (ContentSamples.NpcsByNetId.TryGetValue(i, out var sample))
+                        sampleNpc = sample;
+
+                    Category category = CategorizeNPC(i, sampleNpc, shouldBeCountedAsBoss, townCritter);
 
                     switch (category)
                     {
@@ -532,24 +384,15 @@ namespace AdminPanel
             }
         }
 
-        private static Category CategorizeNPC(int id, Dictionary<int, object> samples,
+        private static Category CategorizeNPC(int id, NPC sampleNpc,
             bool[] shouldBeCountedAsBoss, bool[] townCritter)
         {
-            // Check boss via ContentSamples instance or Sets array
-            if (samples != null && samples.TryGetValue(id, out var npc))
+            // Check via ContentSamples instance
+            if (sampleNpc != null)
             {
-                try
-                {
-                    bool isBoss = _npcBossField != null && (bool)_npcBossField.GetValue(npc);
-                    if (isBoss) return Category.Boss;
-
-                    bool isTown = _npcTownNPCField != null && (bool)_npcTownNPCField.GetValue(npc);
-                    if (isTown) return Category.Town;
-
-                    short catchItem = _npcCatchItemField != null ? (short)_npcCatchItemField.GetValue(npc) : (short)0;
-                    if (catchItem > 0) return Category.Critter;
-                }
-                catch { }
+                if (sampleNpc.boss) return Category.Boss;
+                if (sampleNpc.townNPC) return Category.Town;
+                if (sampleNpc.catchItem > 0) return Category.Critter;
             }
 
             // Fallback to Sets arrays
@@ -650,9 +493,9 @@ namespace AdminPanel
             if (_selectedId <= 0) return;
             try
             {
-                GetPlayerCenter(out float cx, out float cy);
-                int worldX = (int)cx;
-                int worldY = (int)cy - SpawnOffsetY;
+                Vector2 center = Main.player[Main.myPlayer].Center;
+                int worldX = (int)center.X;
+                int worldY = (int)center.Y - SpawnOffsetY;
                 DoSpawn(worldX, worldY);
                 _lastResult = $"Spawned {_selectedName} near player";
             }
@@ -667,11 +510,8 @@ namespace AdminPanel
             if (_selectedId <= 0) return;
             try
             {
-                GetScreenPosition(out float screenX, out float screenY);
-                int mouseX = GetMainMouseX();
-                int mouseY = GetMainMouseY();
-                int worldX = mouseX + (int)screenX;
-                int worldY = mouseY + (int)screenY;
+                int worldX = Main.mouseX + (int)Main.screenPosition.X;
+                int worldY = Main.mouseY + (int)Main.screenPosition.Y;
                 DoSpawn(worldX, worldY);
                 _lastResult = $"Spawned {_selectedName} at cursor";
             }
@@ -683,96 +523,14 @@ namespace AdminPanel
 
         private static void DoSpawn(int worldX, int worldY)
         {
-            if (_npcNewNPC == null)
-                throw new Exception("NPC.NewNPC not found");
-
-            object source = null;
-            if (_entitySourceType != null)
-                source = Activator.CreateInstance(_entitySourceType);
-            if (source == null)
-                throw new Exception("EntitySource not available");
-
-            int myPlayer = _mainMyPlayerField != null ? (int)_mainMyPlayerField.GetValue(null) : 0;
-
-            var parms = _npcNewNPC.GetParameters();
-            var args = new object[parms.Length];
-            args[0] = source;
-            args[1] = worldX;
-            args[2] = worldY;
-            args[3] = _selectedId;
-            for (int i = 4; i < parms.Length; i++)
-            {
-                args[i] = parms[i].HasDefaultValue
-                    ? parms[i].DefaultValue
-                    : (parms[i].ParameterType.IsValueType
-                        ? Activator.CreateInstance(parms[i].ParameterType)
-                        : null);
-            }
-
-            // Set Target parameter to local player (for boss AI)
-            for (int i = 0; i < parms.Length; i++)
-            {
-                if (parms[i].Name == "Target")
-                {
-                    args[i] = myPlayer;
-                    break;
-                }
-            }
-
-            object result = _npcNewNPC.Invoke(null, args);
+            var source = new EntitySource_SpawnNPC();
+            int npcIndex = NPC.NewNPC(source, worldX, worldY, _selectedId, Target: Main.myPlayer);
 
             // Extend timeLeft (prevents despawn, same as SpawnBoss)
-            if (result is int npcIndex && npcIndex >= 0)
+            if (npcIndex >= 0 && npcIndex < Main.npc.Length)
             {
-                try
-                {
-                    var npcArray = _mainNpcField?.GetValue(null) as Array;
-                    if (npcArray != null && npcIndex < npcArray.Length && _npcTimeLeftField != null)
-                    {
-                        var npc = npcArray.GetValue(npcIndex);
-                        int current = (int)_npcTimeLeftField.GetValue(npc);
-                        _npcTimeLeftField.SetValue(npc, current * 20);
-                    }
-                }
-                catch { }
+                Main.npc[npcIndex].timeLeft *= 20;
             }
-        }
-
-        #endregion
-
-        #region Reflection Helpers
-
-        private static void GetPlayerCenter(out float x, out float y)
-        {
-            int myPlayer = (int)_mainMyPlayerField.GetValue(null);
-            var players = (Array)_mainPlayerArrayField.GetValue(null);
-            var player = players.GetValue(myPlayer);
-            var center = _playerCenterProp.GetValue(player);
-            x = (float)_vector2XField.GetValue(center);
-            y = (float)_vector2YField.GetValue(center);
-        }
-
-        private static void GetScreenPosition(out float x, out float y)
-        {
-            var screenPos = _mainScreenPositionField.GetValue(null);
-            x = (float)_vector2XField.GetValue(screenPos);
-            y = (float)_vector2YField.GetValue(screenPos);
-        }
-
-        private static int GetMainMouseX()
-        {
-            return (int)_mainMouseXField.GetValue(null);
-        }
-
-        private static int GetMainMouseY()
-        {
-            return (int)_mainMouseYField.GetValue(null);
-        }
-
-        private static bool IsGameMenu()
-        {
-            try { return _mainGameMenuField != null && (bool)_mainGameMenuField.GetValue(null); }
-            catch { return false; }
         }
 
         #endregion

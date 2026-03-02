@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace SeedLab.Patches
@@ -72,13 +73,12 @@ namespace SeedLab.Patches
             _log = log;
             _manager = manager;
 
-            var terrariaAsm = Assembly.Load("Terraria");
-            var worldGenType = terrariaAsm.GetType("Terraria.WorldGen");
-            _mainType = terrariaAsm.GetType("Terraria.Main");
-            _npcType = terrariaAsm.GetType("Terraria.NPC");
+            var worldGenType = typeof(WorldGen);
+            _mainType = typeof(Main);
+            _npcType = typeof(NPC);
 
             // Find SecretSeed type
-            _secretSeedType = worldGenType?.GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
+            _secretSeedType = typeof(WorldGen).GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
             if (_secretSeedType == null)
             {
                 _log.Error("[SeedLab] FinalizeSecretSeedsPatch: Could not find WorldGen.SecretSeed");
@@ -114,18 +114,18 @@ namespace SeedLab.Patches
 
             // Cache Variations type for noSpiderCaves check
             _variationsType = _secretSeedType.GetNestedType("Variations", BindingFlags.Public | BindingFlags.NonPublic)
-                ?? worldGenType?.GetNestedType("Variations", BindingFlags.Public | BindingFlags.NonPublic);
+                ?? typeof(WorldGen).GetNestedType("Variations", BindingFlags.Public | BindingFlags.NonPublic);
             if (_variationsType != null)
                 _noSpiderCavesVariantProp = _variationsType.GetProperty("noSpiderCavesActuallyNoSpiderCaves", BindingFlags.Public | BindingFlags.Static);
             if (_npcType != null)
                 _savedStylistField = _npcType.GetField("savedStylist", BindingFlags.Public | BindingFlags.Static);
 
             // Cache ExtraSpawnPointManager for teamBasedSpawns
-            _extraSpawnPointManagerType = terrariaAsm.GetType("Terraria.GameContent.ExtraSpawnPointManager");
+            _extraSpawnPointManagerType = typeof(Main).Assembly.GetType("Terraria.GameContent.ExtraSpawnPointManager");
             if (_extraSpawnPointManagerType != null)
                 _generateExtraSpawnsMethod = _extraSpawnPointManagerType.GetMethod("GenerateExtraSpawns",
                     BindingFlags.Public | BindingFlags.Static);
-            _extraSpawnSettingsType = terrariaAsm.GetType("Terraria.GameContent.ExtraSpawnSettings");
+            _extraSpawnSettingsType = typeof(Main).Assembly.GetType("Terraria.GameContent.ExtraSpawnSettings");
 
             // Find FinalizeSecretSeeds method
             var finalizeMethod = _secretSeedType.GetMethod("FinalizeSecretSeeds",
@@ -304,7 +304,7 @@ namespace SeedLab.Patches
         {
             try
             {
-                var type = Assembly.Load("Terraria").GetType(typeName);
+                var type = typeof(Main).Assembly.GetType(typeName);
                 var field = type?.GetField(fieldName, BindingFlags.Public | BindingFlags.Static);
                 if (field != null) return (bool)field.GetValue(null);
                 // Fallback: try property (e.g. Main.isThereAWorldSurface is a getter-only property)
@@ -318,7 +318,7 @@ namespace SeedLab.Patches
         {
             try
             {
-                var type = Assembly.Load("Terraria").GetType(typeName);
+                var type = typeof(Main).Assembly.GetType(typeName);
                 return type != null ? Enum.Parse(type, valueName) : 0;
             }
             catch { return 0; }

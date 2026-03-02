@@ -1,8 +1,8 @@
 using System;
-using System.Linq;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Logging;
 
@@ -19,12 +19,6 @@ namespace AutoBuffs
         private static Harmony _harmony;
         private static Timer _patchTimer;
         private static int _initDelayFrames = 300;
-
-        // Cached reflection
-        private static Type _mainType;
-        private static Type _playerType;
-        private static FieldInfo _gameMenuField;
-        private static FieldInfo _myPlayerField;
 
         // Config values (cached for performance)
         internal static bool Enabled = true;
@@ -48,22 +42,6 @@ namespace AutoBuffs
 
             try
             {
-                // Find types
-                // Some assemblies throw on GetTypes() - skip them
-                _mainType = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(a => { try { return a.GetTypes(); } catch { return new Type[0]; } })
-                    .FirstOrDefault(t => t.FullName == "Terraria.Main");
-
-                if (_mainType == null)
-                {
-                    _log.Error("Could not find Terraria.Main type");
-                    return;
-                }
-
-                _playerType = _mainType.Assembly.GetType("Terraria.Player");
-                _gameMenuField = _mainType.GetField("gameMenu", BindingFlags.Public | BindingFlags.Static);
-                _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-
                 _harmony = new Harmony("com.terrariamodder.autobuffs");
 
                 // Delay patching by 5 seconds to avoid early initialization issues
@@ -82,7 +60,7 @@ namespace AutoBuffs
             {
                 _log?.Info("Applying patches now...");
 
-                var updateMethod = _playerType.GetMethod("Update", new Type[] { typeof(int) });
+                var updateMethod = typeof(Player).GetMethod("Update", new Type[] { typeof(int) });
                 var postfix = typeof(Mod).GetMethod("PlayerUpdatePostfix", BindingFlags.Public | BindingFlags.Static);
 
                 if (updateMethod != null && postfix != null)
@@ -146,19 +124,17 @@ namespace AutoBuffs
             if (DebugLogging) _log?.Debug(message);
         }
 
-        public static void PlayerUpdatePostfix(object __instance, int i)
+        public static void PlayerUpdatePostfix(Player __instance, int i)
         {
             try
             {
                 if (__instance == null) return;
 
                 // Only process local player
-                int myPlayer = (int)_myPlayerField.GetValue(null);
-                if (i != myPlayer) return;
+                if (i != Main.myPlayer) return;
 
                 // Skip if on menu
-                bool gameMenu = (bool)_gameMenuField.GetValue(null);
-                if (gameMenu) return;
+                if (Main.gameMenu) return;
 
                 // Wait for initialization
                 if (_initDelayFrames > 0)

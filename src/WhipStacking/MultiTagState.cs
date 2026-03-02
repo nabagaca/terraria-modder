@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Terraria.GameContent.Items;
 
 namespace WhipStacking
 {
@@ -9,11 +10,11 @@ namespace WhipStacking
     internal class WhipTagEntry
     {
         public int WhipType;
-        public object Effect; // UniqueTagEffect instance from ItemID.Sets.UniqueTagEffects[type]
+        public UniqueTagEffect Effect;
         public int[] TimeLeftOnNPC;     // size 200 (Main.maxNPCs)
         public int[] ProcTimeLeftOnNPC; // size 200 (Main.maxNPCs)
 
-        public WhipTagEntry(int whipType, object effect, int maxNPCs)
+        public WhipTagEntry(int whipType, UniqueTagEffect effect, int maxNPCs)
         {
             WhipType = whipType;
             Effect = effect;

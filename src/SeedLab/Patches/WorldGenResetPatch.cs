@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace SeedLab.Patches
@@ -45,15 +46,8 @@ namespace SeedLab.Patches
             _log = log;
             _manager = manager;
 
-            var terrariaAsm = Assembly.Load("Terraria");
-
             // Cache Main type and seed flag fields
-            _mainType = terrariaAsm.GetType("Terraria.Main");
-            if (_mainType == null)
-            {
-                _log.Error("[SeedLab] WorldGenResetPatch: Could not find Terraria.Main");
-                return;
-            }
+            _mainType = typeof(Main);
 
             // Collect all Main.* fields needed from the catalog
             var mainFlagNames = new HashSet<string>();
@@ -75,8 +69,7 @@ namespace SeedLab.Patches
             }
 
             // Cache WorldGen type and alias fields
-            _worldGenType = terrariaAsm.GetType("Terraria.WorldGen");
-            if (_worldGenType != null)
+            _worldGenType = typeof(WorldGen);
             {
                 foreach (var kvp in WorldGenFeatureCatalog.MainToWorldGenAlias)
                 {
@@ -89,6 +82,7 @@ namespace SeedLab.Patches
             }
 
             // Cache GenVars derived fields
+            var terrariaAsm = typeof(Main).Assembly;
             _genVarsType = terrariaAsm.GetType("Terraria.WorldBuilding.GenVars")
                 ?? terrariaAsm.GetType("Terraria.GameContent.Generation.GenVars");
             if (_genVarsType != null)
@@ -99,7 +93,7 @@ namespace SeedLab.Patches
             }
 
             // Cache SecretSeed internals
-            _secretSeedType = _worldGenType?.GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
+            _secretSeedType = typeof(WorldGen).GetNestedType("SecretSeed", BindingFlags.Public | BindingFlags.NonPublic);
             if (_secretSeedType != null)
             {
                 _enabledField = _secretSeedType.GetField("_enabled", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -119,7 +113,7 @@ namespace SeedLab.Patches
             }
 
             // Patch WorldGen.Reset()
-            var resetMethod = _worldGenType?.GetMethod("Reset", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
+            var resetMethod = typeof(WorldGen).GetMethod("Reset", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);
             if (resetMethod == null)
             {
                 _log.Error("[SeedLab] WorldGenResetPatch: Could not find WorldGen.Reset()");

@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
 using TerrariaModder.Core.Logging;
-using TerrariaModder.Core.Reflection;
 
 namespace DebugTools
 {

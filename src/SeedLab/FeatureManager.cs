@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Terraria;
 using TerrariaModder.Core.Logging;
 
 namespace SeedLab
@@ -63,14 +64,7 @@ namespace SeedLab
 
         private void InitReflection()
         {
-            _mainType = Type.GetType("Terraria.Main, Terraria")
-                ?? Assembly.Load("Terraria").GetType("Terraria.Main");
-
-            if (_mainType == null)
-            {
-                _log.Error("[SeedLab] Could not find Terraria.Main type");
-                return;
-            }
+            _mainType = typeof(Main);
 
             string[] flagNames = {
                 SeedFeatures.GetGoodWorld,

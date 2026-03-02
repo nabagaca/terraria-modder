@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Microsoft.Xna.Framework;
 using Terraria;
 using TerrariaModder.Core.Assets;
 using TerrariaModder.Core.Reflection;
+using Game = TerrariaModder.Core.Reflection.Game;
 
 namespace DebugTools
 {
@@ -588,7 +590,7 @@ namespace DebugTools
             try
             {
                 string worldName = "";
-                try { worldName = GameAccessor.TryGetMainField<string>("worldName", ""); } catch { }
+                try { worldName = Main.worldName ?? ""; } catch { }
                 sb.Append("\"name\": \"").Append(EscapeJson(worldName)).Append("\", ");
 
                 bool dayTime = false;
@@ -615,7 +617,7 @@ namespace DebugTools
                 sb.Append("\"timeOfDay\": \"").Append(hours.ToString("D2")).Append(":").Append(minutes.ToString("D2")).Append("\", ");
 
                 bool hardMode = false;
-                try { hardMode = GameAccessor.TryGetMainField<bool>("hardMode", false); } catch { }
+                try { hardMode = Main.hardMode; } catch { }
                 sb.Append("\"hardMode\": ").Append(hardMode ? "true" : "false").Append(", ");
 
                 bool bloodMoon = false;
@@ -637,7 +639,7 @@ namespace DebugTools
             sb.Append("}");
         }
 
-        private static void ScanNpcs(List<NpcInfo> hostiles, List<NpcInfo> friendlies, Vec2 playerPos, float rangeSquared)
+        private static void ScanNpcs(List<NpcInfo> hostiles, List<NpcInfo> friendlies, Vector2 playerPos, float rangeSquared)
         {
             for (int i = 0; i < 200; i++)
             {
@@ -646,9 +648,7 @@ namespace DebugTools
                     var npc = Main.npc[i];
                     if (npc == null || !npc.active) continue;
 
-                    var posObj = GameAccessor.TryGetField<object>(npc, "position");
-                    if (posObj == null) continue;
-                    var npcPos = Vec2.FromXna(posObj);
+                    var npcPos = npc.position;
 
                     float dx = npcPos.X - playerPos.X;
                     float dy = npcPos.Y - playerPos.Y;
@@ -686,7 +686,7 @@ namespace DebugTools
             }
         }
 
-        private static void AppendCompactEntities(StringBuilder sb, Vec2 playerPos)
+        private static void AppendCompactEntities(StringBuilder sb, Vector2 playerPos)
         {
             var hostiles = new List<NpcInfo>();
             var friendlies = new List<NpcInfo>();
@@ -715,7 +715,7 @@ namespace DebugTools
             sb.Append("]");
         }
 
-        private static void AppendTileGridRaw(StringBuilder sb, Vec2 playerPos, int width, int height)
+        private static void AppendTileGridRaw(StringBuilder sb, Vector2 playerPos, int width, int height)
         {
             int playerTileX = (int)(playerPos.X / 16f);
             int playerTileY = (int)(playerPos.Y / 16f);

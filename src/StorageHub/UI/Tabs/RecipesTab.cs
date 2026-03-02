@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using TerrariaModder.Core.UI;
 using TerrariaModder.Core.Logging;
 using StorageHub.Crafting;
 using StorageHub.Config;
+using StorageHub.Shared;
 using TerrariaModder.Core.UI.Widgets;
 
 namespace StorageHub.UI.Tabs
@@ -765,7 +765,7 @@ namespace StorageHub.UI.Tabs
             // Load item categories from ContentSamples (once)
             if (_itemCategories == null)
             {
-                _itemCategories = ClassifyAllItems();
+                _itemCategories = ItemClassifier.GetClassificationCache(_log);
             }
 
             // Get all unique output items from recipes
@@ -954,51 +954,21 @@ namespace StorageHub.UI.Tabs
 
         private void DrawCategoryFilterRow(int x, int y)
         {
-            int btnHeight = 25;
-            int labelWidth = 40;
+            var newFilter = CategoryFilterBar.Draw(x, y, "Cat:", 40, _categoryFilter,
+                out string tooltipText, out int tooltipX, out int tooltipY);
 
-            UIRenderer.DrawText("Cat:", x, y + 5, UIColors.TextDim);
-            int xPos = x + labelWidth;
-
-            DrawCategoryFilterButton(xPos, y, 36, btnHeight, "All", CategoryFilter.All, UIColors.TextDim, "All Categories"); xPos += 40;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Wpns", CategoryFilter.Weapons, UIColors.Error, "Weapons"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Tools", CategoryFilter.Tools, UIColors.Info, "Tools"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Armor", CategoryFilter.Armor, UIColors.Accent, "Armor"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 46, btnHeight, "Accs", CategoryFilter.Accessories, UIColors.AccentText, "Accessories"); xPos += 50;
-            DrawCategoryFilterButton(xPos, y, 46, btnHeight, "Cons", CategoryFilter.Consumables, UIColors.Success, "Consumables"); xPos += 50;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Place", CategoryFilter.Placeable, UIColors.Warning, "Placeable"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Mats", CategoryFilter.Materials, UIColors.TextDim, "Materials"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Misc", CategoryFilter.Misc, UIColors.TextHint, "Miscellaneous");
-        }
-
-        private void DrawCategoryFilterButton(int x, int y, int btnWidth, int btnHeight, string text,
-            CategoryFilter filter, Color4 indicatorColor, string tooltip)
-        {
-            bool isActive = _categoryFilter == filter;
-            bool isHovered = WidgetInput.IsMouseOver(x, y, btnWidth, btnHeight);
-
-            Color4 bgColor = isActive ? UIColors.Button : (isHovered ? UIColors.ButtonHover : UIColors.InputBg);
-            UIRenderer.DrawRect(x, y, btnWidth, btnHeight, bgColor);
-
-            if (isActive)
-                UIRenderer.DrawRect(x, y + btnHeight - 2, btnWidth, 2, UIColors.Accent);
-
-            UIRenderer.DrawText(text, x + 5, y + 6, UIColors.TextDim);
-
-            if (isHovered)
+            if (tooltipText != null)
             {
-                _pendingButtonTooltip = tooltip;
-                _pendingTooltipX = x;
-                _pendingTooltipY = y + btnHeight + 5;
-                // (ItemTooltip cleared at frame start)
+                _pendingButtonTooltip = tooltipText;
+                _pendingTooltipX = tooltipX;
+                _pendingTooltipY = tooltipY;
+            }
 
-                if (WidgetInput.MouseLeftClick)
-                {
-                    _categoryFilter = filter;
-                    FilterItems();
-                    _itemScroll.ResetScroll();
-                    WidgetInput.ConsumeClick();
-                }
+            if (newFilter != _categoryFilter)
+            {
+                _categoryFilter = newFilter;
+                FilterItems();
+                _itemScroll.ResetScroll();
             }
         }
 
@@ -1183,67 +1153,25 @@ namespace StorageHub.UI.Tabs
         {
             try
             {
-                var contentSamplesType = Type.GetType("Terraria.ID.ContentSamples, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.ID.ContentSamples");
-                if (contentSamplesType == null)
-                {
-                    _log.Error("Could not find ContentSamples type");
-                    return null;
-                }
-
-                var sortField = contentSamplesType.GetField("ItemCreativeSortingId",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (sortField == null)
-                {
-                    _log.Error("Could not find ItemCreativeSortingId field");
-                    return null;
-                }
-
-                var dict = sortField.GetValue(null);
+                var dict = Terraria.ID.ContentSamples.ItemCreativeSortingId;
                 if (dict == null)
                 {
                     _log.Error("ItemCreativeSortingId is null");
                     return null;
                 }
 
-                // It's Dictionary<int, CreativeHelper.ItemGroupAndOrderInGroup>
+                // Dictionary<int, ContentSamples.CreativeHelper.ItemGroupAndOrderInGroup>
                 // ItemGroupAndOrderInGroup has: int ItemType, ItemGroup Group, int OrderInGroup
-                // We need to read Group (enum, underlying int) for category sorting
                 var result = new Dictionary<int, int>();
-
-                // Use IDictionary interface to iterate
-                var enumerator = dict.GetType().GetMethod("GetEnumerator").Invoke(dict, null);
-                var enumeratorType = enumerator.GetType();
-                var moveNext = enumeratorType.GetMethod("MoveNext");
-                var currentProp = enumeratorType.GetProperty("Current");
-
-                // Get field accessors for the struct
-                FieldInfo groupField = null;
-                FieldInfo orderField = null;
-                FieldInfo itemTypeField = null;
 
                 // Build a list of (itemType, group, orderInGroup) then sort to get sequential indices
                 var entries = new List<(int itemType, int group, int order)>();
 
-                while ((bool)moveNext.Invoke(enumerator, null))
+                foreach (var kvp in dict)
                 {
-                    var kvp = currentProp.GetValue(enumerator);
-                    var kvpType = kvp.GetType();
-
-                    int key = (int)kvpType.GetProperty("Key").GetValue(kvp);
-                    var value = kvpType.GetProperty("Value").GetValue(kvp);
-
-                    if (groupField == null)
-                    {
-                        var valueType = value.GetType();
-                        groupField = valueType.GetField("Group");
-                        orderField = valueType.GetField("OrderInGroup");
-                        itemTypeField = valueType.GetField("ItemType");
-                    }
-
-                    int group = Convert.ToInt32(groupField.GetValue(value));
-                    int order = (int)orderField.GetValue(value);
-                    entries.Add((key, group, order));
+                    int group = (int)kvp.Value.Group;
+                    int order = kvp.Value.OrderInGroup;
+                    entries.Add((kvp.Key, group, order));
                 }
 
                 // Sort by group then by order within group
@@ -1270,96 +1198,5 @@ namespace StorageHub.UI.Tabs
             }
         }
 
-        /// <summary>
-        /// Classify all items into categories using ContentSamples.ItemsByType reflection.
-        /// Called once and cached.
-        /// </summary>
-        private Dictionary<int, CategoryFilter> ClassifyAllItems()
-        {
-            var result = new Dictionary<int, CategoryFilter>();
-            try
-            {
-                var contentSamplesType = Type.GetType("Terraria.ID.ContentSamples, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.ID.ContentSamples");
-                if (contentSamplesType == null) return result;
-
-                var itemsByTypeField = contentSamplesType.GetField("ItemsByType",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (itemsByTypeField == null) return result;
-
-                var dict = itemsByTypeField.GetValue(null) as System.Collections.IDictionary;
-                if (dict == null) return result;
-
-                // Cache field accessors
-                FieldInfo damageField = null, pickField = null, axeField = null, hammerField = null;
-                FieldInfo headSlotField = null, bodySlotField = null, legSlotField = null;
-                FieldInfo accessoryField = null, consumableField = null;
-                FieldInfo createTileField = null, createWallField = null, materialField = null;
-
-                foreach (System.Collections.DictionaryEntry entry in dict)
-                {
-                    int id = (int)entry.Key;
-                    var item = entry.Value;
-
-                    if (damageField == null)
-                    {
-                        var t = item.GetType();
-                        damageField = t.GetField("damage");
-                        pickField = t.GetField("pick");
-                        axeField = t.GetField("axe");
-                        hammerField = t.GetField("hammer");
-                        headSlotField = t.GetField("headSlot");
-                        bodySlotField = t.GetField("bodySlot");
-                        legSlotField = t.GetField("legSlot");
-                        accessoryField = t.GetField("accessory");
-                        consumableField = t.GetField("consumable");
-                        createTileField = t.GetField("createTile");
-                        createWallField = t.GetField("createWall");
-                        materialField = t.GetField("material");
-                    }
-
-                    int damage = (int)damageField.GetValue(item);
-                    int pick = (int)pickField.GetValue(item);
-                    int axe = (int)axeField.GetValue(item);
-                    int hammer = (int)hammerField.GetValue(item);
-                    int headSlot = (int)headSlotField.GetValue(item);
-                    int bodySlot = (int)bodySlotField.GetValue(item);
-                    int legSlot = (int)legSlotField.GetValue(item);
-                    bool accessory = (bool)accessoryField.GetValue(item);
-                    bool consumable = (bool)consumableField.GetValue(item);
-                    int createTile = (int)createTileField.GetValue(item);
-                    int createWall = (int)createWallField.GetValue(item);
-                    bool material = (bool)materialField.GetValue(item);
-
-                    // Priority order matters: tools have damage, placeables are consumable
-                    CategoryFilter cat;
-                    if (pick > 0 || axe > 0 || hammer > 0)
-                        cat = CategoryFilter.Tools;
-                    else if (damage > 0)
-                        cat = CategoryFilter.Weapons;
-                    else if (headSlot > -1 || bodySlot > -1 || legSlot > -1)
-                        cat = CategoryFilter.Armor;
-                    else if (accessory)
-                        cat = CategoryFilter.Accessories;
-                    else if (createTile >= 0 || createWall >= 0)
-                        cat = CategoryFilter.Placeable;
-                    else if (consumable)
-                        cat = CategoryFilter.Consumables;
-                    else if (material)
-                        cat = CategoryFilter.Materials;
-                    else
-                        cat = CategoryFilter.Misc;
-
-                    result[id] = cat;
-                }
-
-                _log.Debug($"Classified {result.Count} items into categories");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Failed to classify items: {ex.Message}");
-            }
-            return result;
-        }
     }
 }

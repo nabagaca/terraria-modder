@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Logging;
 
@@ -22,11 +23,6 @@ namespace PetChests
         internal static bool Enabled = true;
         internal static int InteractionRange = 200;
 
-        // Cached types - will be resolved at runtime
-        internal static Type MainType;
-        internal static Type PlayerType;
-        internal static Type ProjectileType;
-
         public void Initialize(ModContext context)
         {
             _context = context;
@@ -38,18 +34,6 @@ namespace PetChests
 
             try
             {
-                // Find Terraria types
-                var terrariaAsm = Assembly.Load("Terraria");
-                MainType = terrariaAsm.GetType("Terraria.Main");
-                PlayerType = terrariaAsm.GetType("Terraria.Player");
-                ProjectileType = terrariaAsm.GetType("Terraria.Projectile");
-
-                if (MainType == null || PlayerType == null || ProjectileType == null)
-                {
-                    _log.Error("Could not find Terraria types");
-                    return;
-                }
-
                 _harmony = new Harmony("com.terrariamodder.petchests");
 
                 // Delay patching to avoid early initialization issues
@@ -69,7 +53,7 @@ namespace PetChests
                 _log?.Info("Applying patches now...");
 
                 // Patch Projectile.IsInteractable
-                var isInteractableMethod = ProjectileType.GetMethod("IsInteractable",
+                var isInteractableMethod = typeof(Projectile).GetMethod("IsInteractable",
                     BindingFlags.Public | BindingFlags.Instance);
                 if (isInteractableMethod != null)
                 {
@@ -80,7 +64,7 @@ namespace PetChests
                 }
 
                 // Patch Projectile.TryGetContainerIndex
-                var tryGetContainerMethod = ProjectileType.GetMethod("TryGetContainerIndex",
+                var tryGetContainerMethod = typeof(Projectile).GetMethod("TryGetContainerIndex",
                     BindingFlags.Public | BindingFlags.Instance);
                 if (tryGetContainerMethod != null)
                 {
@@ -91,7 +75,7 @@ namespace PetChests
                 }
 
                 // Patch Player.Update - use dynamic method lookup
-                var updateMethod = PlayerType.GetMethod("Update", new Type[] { typeof(int) });
+                var updateMethod = typeof(Player).GetMethod("Update", new Type[] { typeof(int) });
                 if (updateMethod != null)
                 {
                     var prefix = typeof(Mod).GetMethod("PlayerUpdate_Prefix",
@@ -105,8 +89,7 @@ namespace PetChests
                 }
 
                 // Patch Main.PlayInteractiveProjectileOpenCloseSound to mute during pet piggy bank
-                // Method signature: public static void PlayInteractiveProjectileOpenCloseSound(int projType, bool open)
-                var playSoundMethod = MainType.GetMethod("PlayInteractiveProjectileOpenCloseSound",
+                var playSoundMethod = typeof(Main).GetMethod("PlayInteractiveProjectileOpenCloseSound",
                     BindingFlags.Public | BindingFlags.Static,
                     null, new Type[] { typeof(int), typeof(bool) }, null);
                 if (playSoundMethod != null)
@@ -122,7 +105,7 @@ namespace PetChests
                 }
 
                 // Patch Player.HandleBeingInChestRange to skip tile-based chest checks when our pet piggy is open
-                var handleChestMethod = PlayerType.GetMethod("HandleBeingInChestRange",
+                var handleChestMethod = typeof(Player).GetMethod("HandleBeingInChestRange",
                     BindingFlags.NonPublic | BindingFlags.Instance);
                 if (handleChestMethod != null)
                 {
@@ -183,7 +166,7 @@ namespace PetChests
         /// Make cosmetic pets interactible like Chester
         /// But NOT while piggy bank is already open or just closed
         /// </summary>
-        public static void IsInteractible_Postfix(object __instance, ref bool __result)
+        public static void IsInteractible_Postfix(Projectile __instance, ref bool __result)
         {
             if (!Enabled) return;
 
@@ -211,7 +194,7 @@ namespace PetChests
         /// <summary>
         /// Return piggy bank container index (-2) for cosmetic pets
         /// </summary>
-        public static bool TryGetContainerIndex_Prefix(object __instance, ref int containerIndex, ref bool __result)
+        public static bool TryGetContainerIndex_Prefix(Projectile __instance, ref int containerIndex, ref bool __result)
         {
             if (!Enabled) return true;
 
@@ -231,32 +214,19 @@ namespace PetChests
 
         private static int _updateCount = 0;
         private const int MIN_UPDATES = 300;
-        private static FieldInfo _gameMenuField;
-        private static FieldInfo _myPlayerField;
-        private static FieldInfo _chestField;
 
         /// <summary>
         /// Prefix: Block input and force chest state before vanilla processes
         /// </summary>
-        public static void PlayerUpdate_Prefix(object __instance, int i)
+        public static void PlayerUpdate_Prefix(Player __instance, int i)
         {
             if (_updateCount < MIN_UPDATES) return;
             if (!Enabled) return;
 
             try
             {
-                if (_gameMenuField == null)
-                    _gameMenuField = MainType.GetField("gameMenu", BindingFlags.Public | BindingFlags.Static);
-                if (_myPlayerField == null)
-                    _myPlayerField = MainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-                if (_chestField == null)
-                    _chestField = PlayerType.GetField("chest", BindingFlags.Public | BindingFlags.Instance);
-
-                bool gameMenu = (bool)_gameMenuField.GetValue(null);
-                if (gameMenu) return;
-
-                int myPlayer = (int)_myPlayerField.GetValue(null);
-                if (i != myPlayer) return;
+                if (Main.gameMenu) return;
+                if (i != Main.myPlayer) return;
 
                 // Block input BEFORE vanilla processes it - critical for preventing clicking sounds
                 PetInteraction.BlockInputInPrefix(__instance);
@@ -264,10 +234,9 @@ namespace PetChests
                 // If we're keeping piggy open, force chest state
                 if (PetInteraction.IsKeepingPiggyOpen())
                 {
-                    int chest = (int)_chestField.GetValue(__instance);
-                    if (chest == -1)
+                    if (__instance.chest == -1)
                     {
-                        _chestField.SetValue(__instance, -2);
+                        __instance.chest = -2;
                     }
                 }
             }
@@ -277,7 +246,7 @@ namespace PetChests
         /// <summary>
         /// Postfix: Handle pet interactions
         /// </summary>
-        public static void PlayerUpdate_Postfix(object __instance, int i)
+        public static void PlayerUpdate_Postfix(Player __instance, int i)
         {
             _updateCount++;
             if (_updateCount < MIN_UPDATES) return;
@@ -285,16 +254,8 @@ namespace PetChests
 
             try
             {
-                if (_gameMenuField == null)
-                    _gameMenuField = MainType.GetField("gameMenu", BindingFlags.Public | BindingFlags.Static);
-                if (_myPlayerField == null)
-                    _myPlayerField = MainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-
-                bool gameMenu = (bool)_gameMenuField.GetValue(null);
-                if (gameMenu) return;
-
-                int myPlayer = (int)_myPlayerField.GetValue(null);
-                if (i != myPlayer) return;
+                if (Main.gameMenu) return;
+                if (i != Main.myPlayer) return;
 
                 // Set interactible flags for cosmetic pets
                 PetInteraction.SetInteractableFlags(__instance);
@@ -331,7 +292,7 @@ namespace PetChests
         /// Chester works because it sets the tracker to a valid type 960 projectile.
         /// We can't do that with cosmetic pets (wrong type), so we skip the method entirely.
         /// </summary>
-        public static bool HandleChestRange_Prefix(object __instance)
+        public static bool HandleChestRange_Prefix(Player __instance)
         {
             if (!Enabled) return true;
 
