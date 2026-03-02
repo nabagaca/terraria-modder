@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Threading;
 using Terraria;
@@ -510,23 +509,10 @@ namespace DebugTools
                     );
                 }
 
-                // Read fields directly - Game.cs already has most of them
-                // worldName and hardMode are on Main, expertMode/masterMode are properties
-                string worldName = GameAccessor.TryGetMainField<string>("worldName", "");
-                bool hardMode = GameAccessor.TryGetMainField<bool>("hardMode", false);
-
-                // expertMode and masterMode are properties on Main
-                bool expertMode = false;
-                bool masterMode = false;
-                try
-                {
-                    expertMode = GameAccessor.TryGetStaticProperty<bool>(TypeFinder.Main, "expertMode", false);
-                    masterMode = GameAccessor.TryGetStaticProperty<bool>(TypeFinder.Main, "masterMode", false);
-                }
-                catch (Exception ex)
-                {
-                    _log.Debug($"[DebugHttpServer] Could not read expertMode/masterMode: {ex.Message}");
-                }
+                string worldName = Main.worldName ?? "";
+                bool hardMode = Main.hardMode;
+                bool expertMode = Main.expertMode;
+                bool masterMode = Main.masterMode;
 
                 return JsonObject(
                     JsonPair("inWorld", true),

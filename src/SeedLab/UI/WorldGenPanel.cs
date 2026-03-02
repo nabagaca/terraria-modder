@@ -140,7 +140,9 @@ namespace SeedLab.UI
                 var sv = _scrollViews[_activeTab];
                 sv.Begin(x + Padding, y, PanelWidth - Padding * 2, contentAreaH, contentH);
 
-                UIRenderer.BeginClip(x, y, PanelWidth, contentAreaH);
+                // No BeginClip — virtual scrolling via IsRowVisible handles culling.
+                // BeginClip restarts SpriteBatch with GameViewMatrix which differs from
+                // the UI transform on the title screen, causing content to offset.
                 switch (_activeTab)
                 {
                     case 0: DrawBySeedContent(sv); break;
@@ -148,7 +150,6 @@ namespace SeedLab.UI
                     case 2: DrawPresetsContent(sv); break;
                 }
                 sv.End();
-                UIRenderer.EndClip();
 
                 // Footer
                 DrawFooter(x, y + contentAreaH);

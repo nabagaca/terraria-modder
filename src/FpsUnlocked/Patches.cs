@@ -5,6 +5,10 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Threading;
 using HarmonyLib;
+using Microsoft.Xna.Framework.Input;
+using Terraria;
+using Terraria.Enums;
+using Terraria.GameInput;
 using TerrariaModder.Core.Logging;
 
 namespace FpsUnlocked
@@ -31,7 +35,7 @@ namespace FpsUnlocked
         private static int _diagFullTickCount;
 
         // Saved vanilla state for restoring when switching to VSync mode
-        private static object _savedFrameSkipMode;
+        private static FrameSkipMode _savedFrameSkipMode;
         private static bool _wasOverriding;
 
         // Track interpolation state transitions
@@ -49,13 +53,8 @@ namespace FpsUnlocked
         {
             _log = log;
 
-            // Read TARGET_FRAME_TIME constant
-            var tftField = ReflectionCache.MainType.GetField("TARGET_FRAME_TIME",
-                BindingFlags.Public | BindingFlags.Static);
-            if (tftField != null)
-                _targetFrameTime = (double)tftField.GetValue(null);
-            else
-                _targetFrameTime = 0.016666667; // fallback
+            // Read TARGET_FRAME_TIME constant directly
+            _targetFrameTime = Main.TARGET_FRAME_TIME;
 
             // --- Patch 1: Block SuppressDraw ---
             var suppressDraw = FindSuppressDraw();
@@ -72,7 +71,7 @@ namespace FpsUnlocked
 
             // --- Patch 2: Update postfix (timing overrides) ---
             MethodInfo updateMethod = null;
-            foreach (var m in ReflectionCache.MainType.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
+            foreach (var m in typeof(Main).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
             {
                 if (m.Name == "Update" && m.GetParameters().Length == 1)
                 {
@@ -89,7 +88,7 @@ namespace FpsUnlocked
 
             // --- Patch 3 & 4: DoUpdate prefix/postfix (keyframe capture) ---
             MethodInfo doUpdateMethod = null;
-            foreach (var m in ReflectionCache.MainType.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
+            foreach (var m in typeof(Main).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
             {
                 if (m.Name == "DoUpdate" && m.GetParameters().Length == 1)
                 {
@@ -107,7 +106,7 @@ namespace FpsUnlocked
 
             // --- Patch 5 & 6: DoDraw prefix/postfix (interpolation) ---
             MethodInfo doDrawMethod = null;
-            foreach (var m in ReflectionCache.MainType.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
+            foreach (var m in typeof(Main).GetMethods(BindingFlags.NonPublic | BindingFlags.Instance))
             {
                 if (m.Name == "DoDraw" && m.GetParameters().Length == 1)
                 {
@@ -124,7 +123,7 @@ namespace FpsUnlocked
             }
 
             // --- Patch 7: Camera sub-pixel (remove integer snap via transpiler) ---
-            var cameraMethod = ReflectionCache.MainType.GetMethod("DoDraw_UpdateCameraPosition",
+            var cameraMethod = typeof(Main).GetMethod("DoDraw_UpdateCameraPosition",
                 BindingFlags.NonPublic | BindingFlags.Static);
             if (cameraMethod != null)
             {
@@ -134,31 +133,23 @@ namespace FpsUnlocked
             }
 
             // --- Patch 8: Skip lighting engine on partial ticks ---
-            // Terraria's LightingEngine uses a 4-state cycle (Scan→Blur→...) that advances
+            // Terraria's LightingEngine uses a 4-state cycle (Scan->Blur->...) that advances
             // once per DoDraw call. Held-item lights (torches) are added via Lighting.AddLight
             // during Player.Update (60hz), but cleared after every Blur state.
-            // At >240fps, the Blur state fires more than 60 times/sec → excess Blurs have
-            // empty per-frame lights → held torch brightness oscillates.
+            // At >240fps, the Blur state fires more than 60 times/sec -> excess Blurs have
+            // empty per-frame lights -> held torch brightness oscillates.
             // Fix: skip lighting recalculation on partial ticks (reuse last full-tick map).
-            var lightingType = ReflectionCache.MainType.Assembly.GetType("Terraria.Lighting");
-            if (lightingType != null)
+            var lightTilesMethod = typeof(Lighting).GetMethod("LightTiles",
+                BindingFlags.Public | BindingFlags.Static);
+            if (lightTilesMethod != null)
             {
-                var lightTilesMethod = lightingType.GetMethod("LightTiles",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (lightTilesMethod != null)
-                {
-                    harmony.Patch(lightTilesMethod,
-                        prefix: new HarmonyMethod(typeof(Patches), nameof(LightTiles_Prefix)));
-                    log.Info("Patch 8: Lighting.LightTiles prefix (cap at 240/sec)");
-                }
-                else
-                {
-                    log.Warn("Patch 8: Lighting.LightTiles not found - torch flicker at >240fps");
-                }
+                harmony.Patch(lightTilesMethod,
+                    prefix: new HarmonyMethod(typeof(Patches), nameof(LightTiles_Prefix)));
+                log.Info("Patch 8: Lighting.LightTiles prefix (cap at 240/sec)");
             }
             else
             {
-                log.Warn("Patch 8: Terraria.Lighting type not found");
+                log.Warn("Patch 8: Lighting.LightTiles not found - torch flicker at >240fps");
             }
 
             log.Info("All patches applied successfully");
@@ -167,7 +158,7 @@ namespace FpsUnlocked
         private static MethodInfo FindSuppressDraw()
         {
             // Walk up Main's type hierarchy to find Game.SuppressDraw
-            var type = ReflectionCache.MainType;
+            var type = typeof(Main) as Type;
             while (type != null)
             {
                 var method = type.GetMethod("SuppressDraw",
@@ -192,12 +183,12 @@ namespace FpsUnlocked
             if (!Mod.InterpolationEnabled) return true;
 
             // Don't interfere with title screen / menus
-            if (IsGameMenu()) return true;
+            if (Main.gameMenu) return true;
 
             // Don't block until at least one full tick has captured keyframes
             if (!_firstKeyframeCaptured) return true;
 
-            // Block SuppressDraw → allow Draw to proceed on partial ticks
+            // Block SuppressDraw -> allow Draw to proceed on partial ticks
             return false;
         }
 
@@ -214,12 +205,12 @@ namespace FpsUnlocked
         {
             try
             {
-                bool shouldOverride = Mod.Enabled && Mod.Mode != "VSync (Vanilla)" && !IsGameMenu();
+                bool shouldOverride = Mod.Enabled && Mod.Mode != "VSync (Vanilla)" && !Main.gameMenu;
 
                 // Activation transition
                 if (shouldOverride && !_wasOverriding)
                 {
-                    _savedFrameSkipMode = ReflectionCache.FrameSkipModeField?.GetValue(null);
+                    _savedFrameSkipMode = Main.FrameSkipMode;
                     _wasOverriding = true;
                     _firstKeyframeCaptured = false;
                     _log?.Info($"FPS override activated - Mode: {Mod.Mode}, MaxFPS: {Mod.MaxFps}, " +
@@ -229,8 +220,7 @@ namespace FpsUnlocked
                 else if (!shouldOverride && _wasOverriding)
                 {
                     // Restore vanilla settings
-                    if (_savedFrameSkipMode != null && ReflectionCache.FrameSkipModeField != null)
-                        ReflectionCache.FrameSkipModeField.SetValue(null, _savedFrameSkipMode);
+                    Main.FrameSkipMode = _savedFrameSkipMode;
 
                     SetVSync(true);
 
@@ -257,14 +247,13 @@ namespace FpsUnlocked
                 // FrameSkipMode depends on interpolation
                 if (Mod.InterpolationEnabled)
                 {
-                    // FrameSkipMode.Off enables the accumulator in DoUpdate → 60hz game logic
-                    ReflectionCache.FrameSkipModeField?.SetValue(null, ReflectionCache.FrameSkipOff);
+                    // FrameSkipMode.Off enables the accumulator in DoUpdate -> 60hz game logic
+                    Main.FrameSkipMode = FrameSkipMode.Off;
                 }
                 else
                 {
-                    // FrameSkipMode.On skips accumulator → every frame is a full tick → game speed scales
-                    var frameSkipOn = Enum.ToObject(ReflectionCache.FrameSkipModeField.FieldType, 1);
-                    ReflectionCache.FrameSkipModeField?.SetValue(null, frameSkipOn);
+                    // FrameSkipMode.On skips accumulator -> every frame is a full tick -> game speed scales
+                    Main.FrameSkipMode = FrameSkipMode.On;
                 }
 
                 // Both Capped and Uncapped use variable timestep.
@@ -288,7 +277,7 @@ namespace FpsUnlocked
         {
             try
             {
-                if (ReflectionCache.GraphicsField == null || ReflectionCache.VSyncProp == null)
+                if (ReflectionCache.VSyncProp == null)
                     return;
 
                 // Only call ApplyChanges when VSync state actually changes.
@@ -296,7 +285,7 @@ namespace FpsUnlocked
                 // If we call it every frame, we'd crash on the next Draw.
                 if (enabled == _vsyncCurrent) return;
 
-                var gdm = ReflectionCache.GraphicsField.GetValue(null);
+                var gdm = Main.graphics;
                 if (gdm == null) return;
                 ReflectionCache.VSyncProp.SetValue(gdm, enabled, null);
                 ReflectionCache.ApplyChangesMethod?.Invoke(gdm, null);
@@ -325,7 +314,7 @@ namespace FpsUnlocked
             {
                 // Stopwatch-based frame limiter for Capped mode
                 // (XNA's IsFixedTimeStep has ~7fps overshoot due to timer granularity)
-                if (Mod.Enabled && Mod.Mode == "Capped" && !IsGameMenu())
+                if (Mod.Enabled && Mod.Mode == "Capped" && !Main.gameMenu)
                 {
                     double targetMs = 1000.0 / Mod.MaxFps;
                     double elapsed = _frameLimiter.Elapsed.TotalMilliseconds;
@@ -343,7 +332,7 @@ namespace FpsUnlocked
 
                 if (!ShouldInterpolate()) return;
 
-                _accumulatorBeforeUpdate = ReadAccumulator();
+                _accumulatorBeforeUpdate = Main.UpdateTimeAccumulator;
             }
             catch { }
         }
@@ -366,7 +355,7 @@ namespace FpsUnlocked
                     return;
                 }
 
-                double accAfter = ReadAccumulator();
+                double accAfter = Main.UpdateTimeAccumulator;
 
                 // Detect full tick: accumulator decreased (normal case at >60fps)
                 // OR accumulator >= TARGET_FRAME_TIME (lag case: drained but elapsed > TFT)
@@ -465,40 +454,23 @@ namespace FpsUnlocked
             if (!Mod.MouseEveryFrame) return;
             if (!FrameState.IsPartialTick) return; // Full ticks handle mouse normally
 
-            if (ReflectionCache.MouseGetState == null)
-            {
-                if (!_mouseLoggedOnce)
-                {
-                    _log?.Warn("PollMouse: MouseGetState is null - mouse polling disabled");
-                    _mouseLoggedOnce = true;
-                }
-                return;
-            }
-
             try
             {
-                // Mouse.GetState() → MouseState struct (boxed)
-                object mouseState = ReflectionCache.MouseGetState.Invoke(null, null);
-                int rawX = (int)ReflectionCache.MouseStateXProp.GetValue(mouseState, null);
-                int rawY = (int)ReflectionCache.MouseStateYProp.GetValue(mouseState, null);
+                // Mouse.GetState() -> MouseState struct
+                var mouseState = Mouse.GetState();
+                int rawX = mouseState.X;
+                int rawY = mouseState.Y;
 
                 // Apply RawMouseScale (usually 1.0, changes with DPI scaling)
-                float scaleX = 1f, scaleY = 1f;
-                if (ReflectionCache.RawMouseScaleField != null)
-                {
-                    object scale = ReflectionCache.RawMouseScaleField.GetValue(null);
-                    if (scale != null)
-                    {
-                        scaleX = (float)ReflectionCache.Vec2XField.GetValue(scale);
-                        scaleY = (float)ReflectionCache.Vec2YField.GetValue(scale);
-                    }
-                }
+                var scale = PlayerInput.RawMouseScale;
+                float scaleX = scale.X;
+                float scaleY = scale.Y;
 
                 int mouseX = (int)(rawX * scaleX);
                 int mouseY = (int)(rawY * scaleY);
 
-                ReflectionCache.MainMouseX?.SetValue(null, mouseX);
-                ReflectionCache.MainMouseY?.SetValue(null, mouseY);
+                Main.mouseX = mouseX;
+                Main.mouseY = mouseY;
 
                 if (!_mouseLoggedOnce)
                 {
@@ -549,7 +521,7 @@ namespace FpsUnlocked
         /// <summary>
         /// Transpiler that removes the integer snap on screenPosition in DoDraw_UpdateCameraPosition.
         /// Vanilla does: screenPosition.X = (int)screenPosition.X; (and Y)
-        /// IL pattern: conv.i4 (float→int) + conv.r4 (int→float) = truncation.
+        /// IL pattern: conv.i4 (float->int) + conv.r4 (int->float) = truncation.
         /// We NOP both instructions to preserve the sub-pixel fractional position.
         /// </summary>
         public static IEnumerable<CodeInstruction> CameraPosition_Transpiler(IEnumerable<CodeInstruction> instructions)
@@ -616,33 +588,13 @@ namespace FpsUnlocked
                    Mod.InterpolationEnabled && !IsGamePaused();
         }
 
-        private static bool IsGameMenu()
-        {
-            try
-            {
-                return ReflectionCache.GameMenuField != null &&
-                    (bool)ReflectionCache.GameMenuField.GetValue(null);
-            }
-            catch { return false; }
-        }
-
         private static bool IsGamePaused()
         {
             try
             {
-                bool paused = ReflectionCache.GamePausedField != null &&
-                    (bool)ReflectionCache.GamePausedField.GetValue(null);
-                bool menu = ReflectionCache.GameMenuField != null &&
-                    (bool)ReflectionCache.GameMenuField.GetValue(null);
-                return paused || menu;
+                return Main.gamePaused || Main.gameMenu;
             }
             catch { return true; }
-        }
-
-        private static double ReadAccumulator()
-        {
-            if (ReflectionCache.UpdateTimeAccumulator == null) return 0;
-            return (double)ReflectionCache.UpdateTimeAccumulator.GetValue(null);
         }
 
         /// <summary>
@@ -671,13 +623,13 @@ namespace FpsUnlocked
 
             // Copy player velocity for teleport detection
             // (velocity at end of tick = velocity at start of next tick)
-            var players = ReflectionCache.GetEntityArray(ReflectionCache.MainPlayerField);
+            var players = Main.player;
             if (players != null)
             {
                 int count = Math.Min(players.Length, ReflectionCache.MaxPlayers);
                 for (int i = 0; i < count; i++)
                 {
-                    var p = players.GetValue(i);
+                    var p = players[i];
                     if (p == null) continue;
                     KeyframeStore.PlayerVelBegin[i * 2 + 0] = ReflectionCache.PlayerVelX(p);
                     KeyframeStore.PlayerVelBegin[i * 2 + 1] = ReflectionCache.PlayerVelY(p);

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
+using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Config;
 using TerrariaModder.Core.Events;
@@ -34,7 +34,7 @@ namespace StorageHub
     ///    - Active operations (take/craft) are explicit user actions
     ///
     /// 3. Progression:
-    ///    - 4 tiers using consumable items (Shadow Scale → Luminite)
+    ///    - 4 tiers using consumable items (Shadow Scale -> Luminite)
     ///    - Station memory at Tier 3+ (endgame convenience)
     ///    - Relays extend range without tier upgrade
     ///
@@ -78,20 +78,12 @@ namespace StorageHub
         private DebugDumper _debugDumper;
         public static DebugDumper Dumper { get; private set; }
 
-        // Reflection for getting world/character names
-        private static Type _mainType;
-        private static FieldInfo _worldNameField;
-        private static FieldInfo _playerArrayField;
-        private static FieldInfo _myPlayerField;
-        private static PropertyInfo _playerNameProp;
-
         public void Initialize(ModContext context)
         {
             _log = context.Logger;
             _context = context;
 
             LoadConfig();
-            InitReflection();
 
             if (!_enabled)
             {
@@ -122,34 +114,6 @@ namespace StorageHub
         private void LoadConfig()
         {
             _enabled = _context.Config.Get<bool>("enabled");
-        }
-
-        private void InitReflection()
-        {
-            try
-            {
-                _mainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
-
-                if (_mainType != null)
-                {
-                    _worldNameField = _mainType.GetField("worldName", BindingFlags.Public | BindingFlags.Static);
-                    _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
-                    _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                var playerType = Type.GetType("Terraria.Player, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Player");
-
-                if (playerType != null)
-                {
-                    _playerNameProp = playerType.GetProperty("name", BindingFlags.Public | BindingFlags.Instance);
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Reflection init error: {ex.Message}");
-            }
         }
 
         private void OnToggleUI()
@@ -217,19 +181,16 @@ namespace StorageHub
                 _chestDetector = new ChestOpenDetector(_log, _registry);
                 _chestDetector.Initialize();
 
+                // Initialize range calculator (must be before crafting system)
+                _rangeCalc = new RangeCalculator(_log, _hubConfig);
+
                 // Initialize crafting system
                 _recipeIndex = new RecipeIndex(_log);
-                if (_recipeIndex.InitReflection())
-                {
-                    _recipeIndex.Build();
-                }
-                _craftChecker = new CraftabilityChecker(_log, _recipeIndex, _storageProvider, _hubConfig);
+                _recipeIndex.Build();
+                _craftChecker = new CraftabilityChecker(_log, _recipeIndex, _storageProvider, _hubConfig, _rangeCalc);
                 _craftExecutor = new CraftingExecutor(_log, _storageProvider);
                 _recursiveCrafter = new RecursiveCrafter(_log, _recipeIndex, _craftChecker);
                 _recursiveCrafter.SetExecutor(_craftExecutor);
-
-                // Initialize range calculator
-                _rangeCalc = new RangeCalculator(_log, _hubConfig);
 
                 // Initialize debug dumper (clears old dumps)
                 _debugDumper = new DebugDumper(_log, _modFolder);
@@ -252,29 +213,6 @@ namespace StorageHub
             catch (Exception ex)
             {
                 _log.Error($"OnWorldLoad error: {ex.Message}");
-            }
-        }
-
-        private object GetLocalPlayer()
-        {
-            try
-            {
-                if (_myPlayerField == null || _playerArrayField == null)
-                    return null;
-
-                var myPlayerVal = _myPlayerField.GetValue(null);
-                if (myPlayerVal == null) return null;
-
-                int myPlayer = (int)myPlayerVal;
-                var players = _playerArrayField.GetValue(null) as Array;
-                if (players == null || myPlayer < 0 || myPlayer >= players.Length)
-                    return null;
-
-                return players.GetValue(myPlayer);
-            }
-            catch
-            {
-                return null;
             }
         }
 
@@ -353,7 +291,7 @@ namespace StorageHub
         {
             try
             {
-                var worldName = _worldNameField?.GetValue(null) as string;
+                var worldName = Main.worldName;
                 if (string.IsNullOrEmpty(worldName))
                 {
                     _log.Warn("World name is empty or null");
@@ -372,50 +310,14 @@ namespace StorageHub
         {
             try
             {
-                if (_myPlayerField == null || _playerArrayField == null)
-                {
-                    _log.Warn("Player reflection fields not initialized");
-                    return "Unknown";
-                }
-
-                var myPlayerVal = _myPlayerField.GetValue(null);
-                if (myPlayerVal == null)
-                {
-                    _log.Warn("myPlayer field is null");
-                    return "Unknown";
-                }
-
-                int myPlayer = (int)myPlayerVal;
-                var players = _playerArrayField.GetValue(null) as Array;
-                if (players == null)
-                {
-                    _log.Warn("Player array is null");
-                    return "Unknown";
-                }
-
-                // Bounds check before array access
-                if (myPlayer < 0 || myPlayer >= players.Length)
-                {
-                    _log.Warn($"myPlayer index {myPlayer} out of bounds (array length: {players.Length})");
-                    return "Unknown";
-                }
-
-                var player = players.GetValue(myPlayer);
+                var player = Main.player[Main.myPlayer];
                 if (player == null)
                 {
-                    _log.Warn($"Player at index {myPlayer} is null");
+                    _log.Warn("Player is null");
                     return "Unknown";
                 }
 
-                // Try to get name field/property
-                var charName = _playerNameProp?.GetValue(player) as string;
-                if (string.IsNullOrEmpty(charName))
-                {
-                    // Try direct field access as fallback
-                    var nameField = player.GetType().GetField("name", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                    charName = nameField?.GetValue(player) as string;
-                }
-
+                var charName = player.name;
                 if (string.IsNullOrEmpty(charName))
                 {
                     _log.Warn("Character name is empty or null");

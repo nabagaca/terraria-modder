@@ -2,6 +2,8 @@ using System;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
+using Terraria;
+using Terraria.GameContent.Items;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Logging;
 
@@ -41,10 +43,9 @@ namespace WhipStacking
                     return;
                 }
 
-                var asm = Assembly.Load("Terraria");
-                var tagType = asm.GetType("Terraria.GameContent.Items.TagEffectState");
-                var npcType = asm.GetType("Terraria.NPC");
-                var projType = asm.GetType("Terraria.Projectile");
+                var tagType = typeof(TagEffectState);
+                var npcType = typeof(NPC);
+                var projType = typeof(Projectile);
                 var patchType = typeof(TagPatches);
 
                 int count = 0;

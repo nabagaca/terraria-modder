@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Microsoft.Xna.Framework.Input;
+using Terraria.GameInput;
 using TerrariaModder.Core.Logging;
-using TerrariaModder.Core.Reflection;
 
 namespace DebugTools
 {
@@ -65,7 +66,7 @@ namespace DebugTools
         {
             if (_patchesApplied) return;
 
-            var playerInputType = TypeFinder.PlayerInput;
+            var playerInputType = typeof(PlayerInput);
             if (playerInputType == null)
             {
                 _log?.Error("[VirtualInput] PlayerInput type not found");
@@ -143,7 +144,7 @@ namespace DebugTools
                     BindingFlags.Public | BindingFlags.Static);
 
                 // XNA Keys type and KeyboardState constructor
-                _keysType = TypeFinder.Keys;
+                _keysType = typeof(Keys);
                 if (_keysType != null && _keyStateField != null)
                 {
                     var keyboardStateType = _keyStateField.FieldType;

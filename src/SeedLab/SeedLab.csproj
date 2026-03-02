@@ -21,5 +21,11 @@
       <HintPath>..\..\Terraria\Mods\Libs\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Terraria">
+      <HintPath>..\..\Terraria\Terraria.exe</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Microsoft.Xna.Framework, Version=4.0.0.0, Culture=neutral, PublicKeyToken=842cf8be1de50553" />
+    <Reference Include="Microsoft.Xna.Framework.Graphics, Version=4.0.0.0, Culture=neutral, PublicKeyToken=842cf8be1de50553" />
   </ItemGroup>
 </Project>

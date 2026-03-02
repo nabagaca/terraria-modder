@@ -1,13 +1,12 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
+using Microsoft.Xna.Framework;
+using Terraria;
 
 namespace AutoBuffs
 {
     /// <summary>
     /// Optimized tile scanner for buff-granting furniture.
-    /// Uses reflection to avoid XNA assembly dependencies.
     /// </summary>
     public static class BuffScanner
     {
@@ -53,27 +52,6 @@ namespace AutoBuffs
         }
 
         private static readonly Dictionary<ushort, BuffInfo> _tileToBuffMap = new Dictionary<ushort, BuffInfo>();
-
-        // Cached reflection - Main
-        private static Type _mainType;
-        private static FieldInfo _tileArrayField;
-        private static FieldInfo _maxTilesXField;
-        private static FieldInfo _maxTilesYField;
-
-        // Cached reflection - Player
-        private static FieldInfo _positionField;
-        private static MethodInfo _addBuffMethod;
-        private static MethodInfo _findBuffIndexMethod;
-        private static FieldInfo _buffTimeField;
-
-        // Cached reflection - Tile
-        private static Type _tileType;
-        private static MethodInfo _tileActiveMethod;
-        private static FieldInfo _tileTypeField;
-
-        // Cached reflection - Vector2
-        private static FieldInfo _xField;
-        private static FieldInfo _yField;
 
         public static void Reset()
         {
@@ -125,67 +103,8 @@ namespace AutoBuffs
                     IsEnabled = () => Mod.EnableSliceOfCake
                 };
 
-                // Find Main type (some assemblies throw on GetTypes() - skip them)
-                _mainType = AppDomain.CurrentDomain.GetAssemblies()
-                    .SelectMany(a => { try { return a.GetTypes(); } catch { return new Type[0]; } })
-                    .FirstOrDefault(t => t.FullName == "Terraria.Main");
-
-                if (_mainType == null)
-                {
-                    Mod.Log("Could not find Terraria.Main");
-                    return false;
-                }
-
-                // Find Player type
-                var playerType = _mainType.Assembly.GetType("Terraria.Player");
-
-                // Get Main fields
-                _tileArrayField = _mainType.GetField("tile", BindingFlags.Public | BindingFlags.Static);
-                _maxTilesXField = _mainType.GetField("maxTilesX", BindingFlags.Public | BindingFlags.Static);
-                _maxTilesYField = _mainType.GetField("maxTilesY", BindingFlags.Public | BindingFlags.Static);
-
-                // Get Tile type and members
-                _tileType = _mainType.Assembly.GetType("Terraria.Tile");
-                _tileActiveMethod = _tileType?.GetMethod("active", Type.EmptyTypes);
-                _tileTypeField = _tileType?.GetField("type", BindingFlags.Public | BindingFlags.Instance);
-
-                // Get Player position (from Entity base class)
-                var entityType = playerType.BaseType;
-                _positionField = entityType?.GetField("position", BindingFlags.Public | BindingFlags.Instance)
-                              ?? playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
-
-                // Get Player buff methods
-                _addBuffMethod = playerType.GetMethod("AddBuff",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    new Type[] { typeof(int), typeof(int), typeof(bool) },
-                    null);
-                _findBuffIndexMethod = playerType.GetMethod("FindBuffIndex",
-                    BindingFlags.Public | BindingFlags.Instance,
-                    null,
-                    new Type[] { typeof(int) },
-                    null);
-                _buffTimeField = playerType.GetField("buffTime", BindingFlags.Public | BindingFlags.Instance);
-
-                _initialized = _mainType != null &&
-                              _tileArrayField != null &&
-                              _tileActiveMethod != null &&
-                              _positionField != null &&
-                              _addBuffMethod != null;
-
-                if (_initialized)
-                {
-                    Mod.Log("BuffScanner initialized");
-                }
-                else
-                {
-                    Mod.Log($"BuffScanner init failed:");
-                    Mod.Log($"  Main: {_mainType != null}");
-                    Mod.Log($"  tile: {_tileArrayField != null}");
-                    Mod.Log($"  active: {_tileActiveMethod != null}");
-                    Mod.Log($"  position: {_positionField != null}");
-                    Mod.Log($"  AddBuff: {_addBuffMethod != null}");
-                }
+                _initialized = true;
+                Mod.Log("BuffScanner initialized");
             }
             catch (Exception ex)
             {
@@ -196,7 +115,7 @@ namespace AutoBuffs
             return _initialized;
         }
 
-        public static void TryScan(object player, int scanRadius)
+        public static void TryScan(Player player, int scanRadius)
         {
             if (!EnsureInitialized()) return;
 
@@ -215,29 +134,16 @@ namespace AutoBuffs
             }
         }
 
-        private static void ScanAndApplyBuffs(object player, int scanRadius)
+        private static void ScanAndApplyBuffs(Player player, int scanRadius)
         {
             // Get player tile position
-            var positionObj = _positionField.GetValue(player);
-            if (positionObj == null) return;
-
-            // Initialize Vector2 field access
-            if (_xField == null)
-            {
-                var vec2Type = positionObj.GetType();
-                _xField = vec2Type.GetField("X");
-                _yField = vec2Type.GetField("Y");
-            }
-
-            float posX = (float)_xField.GetValue(positionObj);
-            float posY = (float)_yField.GetValue(positionObj);
-
-            int playerTileX = (int)(posX / 16f);
-            int playerTileY = (int)(posY / 16f);
+            Vector2 position = player.position;
+            int playerTileX = (int)(position.X / 16f);
+            int playerTileY = (int)(position.Y / 16f);
 
             // Get world bounds
-            int maxTilesX = (int)_maxTilesXField.GetValue(null);
-            int maxTilesY = (int)_maxTilesYField.GetValue(null);
+            int maxTilesX = Main.maxTilesX;
+            int maxTilesY = Main.maxTilesY;
 
             // Calculate scan bounds
             int minX = Math.Max(0, playerTileX - scanRadius);
@@ -255,7 +161,7 @@ namespace AutoBuffs
             {
                 if (!kvp.Value.IsEnabled()) continue;
 
-                int buffIndex = (int)_findBuffIndexMethod.Invoke(player, new object[] { kvp.Value.BuffId });
+                int buffIndex = player.FindBuffIndex(kvp.Value.BuffId);
 
                 if (kvp.Value.IsSugarRush)
                 {
@@ -265,8 +171,7 @@ namespace AutoBuffs
                     }
                     else
                     {
-                        int[] buffTime = (int[])_buffTimeField.GetValue(player);
-                        if (buffTime != null && buffTime[buffIndex] <= SUGAR_RUSH_REAPPLY_THRESHOLD)
+                        if (player.buffTime[buffIndex] <= SUGAR_RUSH_REAPPLY_THRESHOLD)
                         {
                             neededTiles.Add(kvp.Key);
                         }
@@ -290,10 +195,6 @@ namespace AutoBuffs
 
             Mod.LogDebug($"Scanning for {neededTiles.Count} buff tiles around ({playerTileX}, {playerTileY})");
 
-            // Get tile array as 2D array
-            var tileArray = _tileArrayField.GetValue(null) as Array;
-            if (tileArray == null) return;
-
             // Scan tiles
             for (int x = minX; x <= maxX && foundTiles.Count < neededTiles.Count; x++)
             {
@@ -309,16 +210,13 @@ namespace AutoBuffs
                     if (dxSq + dy * dy > radiusSq)
                         continue;
 
-                    // Get tile using Array.GetValue for 2D array
-                    var tile = tileArray.GetValue(x, y);
-                    if (tile == null) continue;
+                    Tile tile = Main.tile[x, y];
 
                     // Check if tile is active
-                    bool isActive = (bool)_tileActiveMethod.Invoke(tile, null);
-                    if (!isActive) continue;
+                    if (!tile.active()) continue;
 
                     // Get tile type
-                    ushort tileType = (ushort)_tileTypeField.GetValue(tile);
+                    ushort tileType = tile.type;
 
                     // Check if this is a tile we need and haven't found yet
                     if (neededTiles.Contains(tileType) && !foundTiles.Contains(tileType))
@@ -354,13 +252,13 @@ namespace AutoBuffs
             }
         }
 
-        private static void ApplyBuff(object player, BuffInfo info)
+        private static void ApplyBuff(Player player, BuffInfo info)
         {
             int duration = info.IsSugarRush ? SUGAR_RUSH_DURATION_TICKS : EFFECTIVELY_INFINITE_BUFF_TICKS;
 
             try
             {
-                _addBuffMethod.Invoke(player, new object[] { info.BuffId, duration, true });
+                player.AddBuff(info.BuffId, duration, true);
             }
             catch (Exception ex)
             {

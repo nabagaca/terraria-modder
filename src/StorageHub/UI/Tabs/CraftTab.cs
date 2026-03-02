@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using TerrariaModder.Core.UI;
 using TerrariaModder.Core.Logging;
 using StorageHub.Crafting;
 using StorageHub.Config;
+using StorageHub.Shared;
 using StorageHub.Storage;
 using TerrariaModder.Core.Config;
 using TerrariaModder.Core.UI.Widgets;
@@ -696,50 +696,21 @@ namespace StorageHub.UI.Tabs
 
         private void DrawCategoryFilterRow(int x, int y, int width)
         {
-            int btnHeight = 25;
-            int labelWidth = 40;
+            var newFilter = CategoryFilterBar.Draw(x, y, "Cat:", 40, _categoryFilter,
+                out string tooltipText, out int tooltipX, out int tooltipY);
 
-            UIRenderer.DrawText("Cat:", x, y + 5, UIColors.TextDim);
-            int xPos = x + labelWidth;
-
-            DrawCategoryFilterButton(xPos, y, 36, btnHeight, "All", CategoryFilter.All, UIColors.TextDim, "All Categories"); xPos += 40;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Wpns", CategoryFilter.Weapons, UIColors.Error, "Weapons"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Tools", CategoryFilter.Tools, UIColors.Info, "Tools"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Armor", CategoryFilter.Armor, UIColors.Accent, "Armor"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 46, btnHeight, "Accs", CategoryFilter.Accessories, UIColors.AccentText, "Accessories"); xPos += 50;
-            DrawCategoryFilterButton(xPos, y, 46, btnHeight, "Cons", CategoryFilter.Consumables, UIColors.Success, "Consumables"); xPos += 50;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Place", CategoryFilter.Placeable, UIColors.Warning, "Placeable"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Mats", CategoryFilter.Materials, UIColors.TextDim, "Materials"); xPos += 54;
-            DrawCategoryFilterButton(xPos, y, 50, btnHeight, "Misc", CategoryFilter.Misc, UIColors.TextHint, "Miscellaneous");
-        }
-
-        private void DrawCategoryFilterButton(int x, int y, int btnWidth, int btnHeight, string text,
-            CategoryFilter filter, Color4 indicatorColor, string tooltip)
-        {
-            bool isActive = _categoryFilter == filter;
-            bool isHovered = WidgetInput.IsMouseOver(x, y, btnWidth, btnHeight);
-
-            Color4 bgColor = isActive ? UIColors.Button : (isHovered ? UIColors.ButtonHover : UIColors.InputBg);
-            UIRenderer.DrawRect(x, y, btnWidth, btnHeight, bgColor);
-
-            if (isActive)
-                UIRenderer.DrawRect(x, y + btnHeight - 2, btnWidth, 2, UIColors.Accent);
-
-            UIRenderer.DrawText(text, x + 5, y + 6, UIColors.TextDim);
-
-            if (isHovered)
+            if (tooltipText != null)
             {
-                _craftTooltipText = tooltip;
-                _craftTooltipX = x;
-                _craftTooltipY = y + btnHeight + 5;
+                _craftTooltipText = tooltipText;
+                _craftTooltipX = tooltipX;
+                _craftTooltipY = tooltipY;
+            }
 
-                if (WidgetInput.MouseLeftClick)
-                {
-                    _categoryFilter = filter;
-                    FilterRecipes();
-                    _scrollPanel.ResetScroll();
-                    WidgetInput.ConsumeClick();
-                }
+            if (newFilter != _categoryFilter)
+            {
+                _categoryFilter = newFilter;
+                FilterRecipes();
+                _scrollPanel.ResetScroll();
             }
         }
 
@@ -1015,7 +986,7 @@ namespace StorageHub.UI.Tabs
             // Load item categories from ContentSamples (once)
             if (_itemCategories == null)
             {
-                _itemCategories = ClassifyAllItems();
+                _itemCategories = ItemClassifier.GetClassificationCache(_log);
             }
 
             // Always get directly craftable recipes first
@@ -1196,97 +1167,6 @@ namespace StorageHub.UI.Tabs
 
             // Restore selection by stable recipe identity (not list position)
             RestoreSelection();
-        }
-
-        /// <summary>
-        /// Classify all items into categories using ContentSamples.ItemsByType reflection.
-        /// Called once and cached.
-        /// </summary>
-        private Dictionary<int, CategoryFilter> ClassifyAllItems()
-        {
-            var result = new Dictionary<int, CategoryFilter>();
-            try
-            {
-                var contentSamplesType = Type.GetType("Terraria.ID.ContentSamples, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.ID.ContentSamples");
-                if (contentSamplesType == null) return result;
-
-                var itemsByTypeField = contentSamplesType.GetField("ItemsByType",
-                    BindingFlags.Public | BindingFlags.Static);
-                if (itemsByTypeField == null) return result;
-
-                var dict = itemsByTypeField.GetValue(null) as System.Collections.IDictionary;
-                if (dict == null) return result;
-
-                FieldInfo damageField = null, pickField = null, axeField = null, hammerField = null;
-                FieldInfo headSlotField = null, bodySlotField = null, legSlotField = null;
-                FieldInfo accessoryField = null, consumableField = null;
-                FieldInfo createTileField = null, createWallField = null, materialField = null;
-
-                foreach (System.Collections.DictionaryEntry entry in dict)
-                {
-                    int id = (int)entry.Key;
-                    var item = entry.Value;
-
-                    if (damageField == null)
-                    {
-                        var t = item.GetType();
-                        damageField = t.GetField("damage");
-                        pickField = t.GetField("pick");
-                        axeField = t.GetField("axe");
-                        hammerField = t.GetField("hammer");
-                        headSlotField = t.GetField("headSlot");
-                        bodySlotField = t.GetField("bodySlot");
-                        legSlotField = t.GetField("legSlot");
-                        accessoryField = t.GetField("accessory");
-                        consumableField = t.GetField("consumable");
-                        createTileField = t.GetField("createTile");
-                        createWallField = t.GetField("createWall");
-                        materialField = t.GetField("material");
-                    }
-
-                    int damage = (int)damageField.GetValue(item);
-                    int pick = (int)pickField.GetValue(item);
-                    int axe = (int)axeField.GetValue(item);
-                    int hammer = (int)hammerField.GetValue(item);
-                    int headSlot = (int)headSlotField.GetValue(item);
-                    int bodySlot = (int)bodySlotField.GetValue(item);
-                    int legSlot = (int)legSlotField.GetValue(item);
-                    bool accessory = (bool)accessoryField.GetValue(item);
-                    bool consumable = (bool)consumableField.GetValue(item);
-                    int createTile = (int)createTileField.GetValue(item);
-                    int createWall = (int)createWallField.GetValue(item);
-                    bool material = (bool)materialField.GetValue(item);
-
-                    // Priority order matters: tools have damage, placeables are consumable
-                    CategoryFilter cat;
-                    if (pick > 0 || axe > 0 || hammer > 0)
-                        cat = CategoryFilter.Tools;
-                    else if (damage > 0)
-                        cat = CategoryFilter.Weapons;
-                    else if (headSlot > -1 || bodySlot > -1 || legSlot > -1)
-                        cat = CategoryFilter.Armor;
-                    else if (accessory)
-                        cat = CategoryFilter.Accessories;
-                    else if (createTile >= 0 || createWall >= 0)
-                        cat = CategoryFilter.Placeable;
-                    else if (consumable)
-                        cat = CategoryFilter.Consumables;
-                    else if (material)
-                        cat = CategoryFilter.Materials;
-                    else
-                        cat = CategoryFilter.Misc;
-
-                    result[id] = cat;
-                }
-
-                _log.Debug($"[CraftTab] Classified {result.Count} items into categories");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"[CraftTab] Failed to classify items: {ex.Message}");
-            }
-            return result;
         }
 
         private enum CraftSortMode

@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
+using Terraria;
 using StorageHub.Config;
 using TerrariaModder.Core.Logging;
 
@@ -8,7 +8,7 @@ namespace StorageHub.Storage
 {
     /// <summary>
     /// Singleplayer implementation of IStorageProvider.
-    /// Uses direct array access via reflection to Main.chest[], player inventory, and banks.
+    /// Uses direct typed access to Main.chest[], player inventory, and banks.
     ///
     /// DESIGN RATIONALE - Why this is the singleplayer implementation:
     ///
@@ -30,159 +30,11 @@ namespace StorageHub.Storage
         private readonly ChestRegistry _registry;
         private readonly StorageHubConfig _config;
 
-        // Reflection cache
-        private static Type _mainType;
-        private static Type _chestType;
-        private static Type _itemType;
-        private static Type _playerType;
-
-        private static FieldInfo _chestArrayField;
-        private static FieldInfo _playerArrayField;
-        private static FieldInfo _myPlayerField;
-
-        private static FieldInfo _chestItemField;
-        private static FieldInfo _chestXField;
-        private static FieldInfo _chestYField;
-        private static FieldInfo _chestNameField;
-
-        private static PropertyInfo _itemNameProp;
-        private static FieldInfo _itemTypeField;
-        private static FieldInfo _itemStackField;
-        private static FieldInfo _itemPrefixField;
-        private static FieldInfo _itemMaxStackField;
-        private static FieldInfo _itemRarityField;
-        private static FieldInfo _itemDamageField;
-        private static FieldInfo _itemPickField;
-        private static FieldInfo _itemAxeField;
-        private static FieldInfo _itemHammerField;
-        private static FieldInfo _itemHeadSlotField;
-        private static FieldInfo _itemBodySlotField;
-        private static FieldInfo _itemLegSlotField;
-        private static FieldInfo _itemAccessoryField;
-        private static FieldInfo _itemConsumableField;
-        private static FieldInfo _itemCreateTileField;
-        private static FieldInfo _itemCreateWallField;
-        private static FieldInfo _itemMaterialField;
-
-        private static FieldInfo _playerInventoryField;
-        private static FieldInfo _playerBankField;
-        private static FieldInfo _playerBank2Field;
-        private static FieldInfo _playerBank3Field;
-        private static FieldInfo _playerBank4Field;
-        private static FieldInfo _playerPositionField;
-
-        private static FieldInfo _mouseItemField;
-        private static MethodInfo _itemSetDefaultsMethod;
-        private static MethodInfo _itemPrefixMethod;
-
-        private static bool _reflectionInitialized = false;
-
         public SingleplayerProvider(ILogger log, ChestRegistry registry, StorageHubConfig config)
         {
             _log = log;
             _registry = registry;
             _config = config;
-
-            if (!_reflectionInitialized)
-            {
-                InitializeReflection();
-            }
-        }
-
-        private void InitializeReflection()
-        {
-            try
-            {
-                _mainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
-                _chestType = Type.GetType("Terraria.Chest, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Chest");
-                _itemType = Type.GetType("Terraria.Item, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Item");
-                _playerType = Type.GetType("Terraria.Player, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Player");
-
-                if (_mainType != null)
-                {
-                    _chestArrayField = _mainType.GetField("chest", BindingFlags.Public | BindingFlags.Static);
-                    _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
-                    _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                if (_chestType != null)
-                {
-                    _chestItemField = _chestType.GetField("item", BindingFlags.Public | BindingFlags.Instance);
-                    _chestXField = _chestType.GetField("x", BindingFlags.Public | BindingFlags.Instance);
-                    _chestYField = _chestType.GetField("y", BindingFlags.Public | BindingFlags.Instance);
-                    _chestNameField = _chestType.GetField("name", BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                if (_itemType != null)
-                {
-                    _itemNameProp = _itemType.GetProperty("Name", BindingFlags.Public | BindingFlags.Instance);
-                    _itemTypeField = _itemType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
-                    _itemStackField = _itemType.GetField("stack", BindingFlags.Public | BindingFlags.Instance);
-                    _itemPrefixField = _itemType.GetField("prefix", BindingFlags.Public | BindingFlags.Instance);
-                    _itemMaxStackField = _itemType.GetField("maxStack", BindingFlags.Public | BindingFlags.Instance);
-                    _itemRarityField = _itemType.GetField("rare", BindingFlags.Public | BindingFlags.Instance);
-                    // Category fields
-                    _itemDamageField = _itemType.GetField("damage", BindingFlags.Public | BindingFlags.Instance);
-                    _itemPickField = _itemType.GetField("pick", BindingFlags.Public | BindingFlags.Instance);
-                    _itemAxeField = _itemType.GetField("axe", BindingFlags.Public | BindingFlags.Instance);
-                    _itemHammerField = _itemType.GetField("hammer", BindingFlags.Public | BindingFlags.Instance);
-                    _itemHeadSlotField = _itemType.GetField("headSlot", BindingFlags.Public | BindingFlags.Instance);
-                    _itemBodySlotField = _itemType.GetField("bodySlot", BindingFlags.Public | BindingFlags.Instance);
-                    _itemLegSlotField = _itemType.GetField("legSlot", BindingFlags.Public | BindingFlags.Instance);
-                    _itemAccessoryField = _itemType.GetField("accessory", BindingFlags.Public | BindingFlags.Instance);
-                    _itemConsumableField = _itemType.GetField("consumable", BindingFlags.Public | BindingFlags.Instance);
-                    _itemCreateTileField = _itemType.GetField("createTile", BindingFlags.Public | BindingFlags.Instance);
-                    _itemCreateWallField = _itemType.GetField("createWall", BindingFlags.Public | BindingFlags.Instance);
-                    _itemMaterialField = _itemType.GetField("material", BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                if (_playerType != null)
-                {
-                    _playerInventoryField = _playerType.GetField("inventory", BindingFlags.Public | BindingFlags.Instance);
-                    _playerBankField = _playerType.GetField("bank", BindingFlags.Public | BindingFlags.Instance);
-                    _playerBank2Field = _playerType.GetField("bank2", BindingFlags.Public | BindingFlags.Instance);
-                    _playerBank3Field = _playerType.GetField("bank3", BindingFlags.Public | BindingFlags.Instance);
-                    _playerBank4Field = _playerType.GetField("bank4", BindingFlags.Public | BindingFlags.Instance);
-                    _playerPositionField = _playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                if (_mainType != null)
-                {
-                    _mouseItemField = _mainType.GetField("mouseItem", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                if (_itemType != null)
-                {
-                    // SetDefaults signature is SetDefaults(int Type, ItemVariant variant = null)
-                    // GetMethod with just typeof(int) won't match a 2-param method, so search by name
-                    foreach (var m in _itemType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        if (m.Name == "SetDefaults")
-                        {
-                            var p = m.GetParameters();
-                            if (p.Length >= 1 && p[0].ParameterType == typeof(int))
-                            {
-                                _itemSetDefaultsMethod = m;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Item.Prefix(int) applies stat modifiers from prefix
-                    _itemPrefixMethod = _itemType.GetMethod("Prefix", new[] { typeof(int) });
-                }
-
-                _reflectionInitialized = true;
-                _log.Debug("SingleplayerProvider reflection initialized");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Failed to initialize reflection: {ex.Message}");
-            }
         }
 
         public List<ItemSnapshot> GetAllItems()
@@ -204,7 +56,7 @@ namespace StorageHub.Storage
                 }
 
                 // Get items from registered chests
-                var chests = _chestArrayField?.GetValue(null) as Array;
+                var chests = Main.chest;
                 int registeredCount = _registry.Count;
                 int foundChests = 0;
                 int chestItems = 0;
@@ -213,12 +65,12 @@ namespace StorageHub.Storage
                 {
                     foreach (var pos in _registry.GetRegisteredPositions())
                     {
-                        int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                        int chestIndex = FindChestAtPosition(pos.x, pos.y);
                         if (chestIndex >= 0)
                         {
                             foundChests++;
                             int before = items.Count;
-                            AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
+                            AddChestItems(chests[chestIndex], chestIndex, items);
                             chestItems += items.Count - before;
                         }
                     }
@@ -247,13 +99,11 @@ namespace StorageHub.Storage
                     AddInventoryItems(player, items);
 
                     // Portable banks are always accessible
-                    // TODO: Check if player has Money Trough, Safe item, or Void Bag equipped
-                    // For now, add all banks - this is more permissive than design spec
                     AddBankItems(player, items);
                 }
 
                 // Get items from registered chests within range
-                var chests = _chestArrayField?.GetValue(null) as Array;
+                var chests = Main.chest;
                 if (chests != null)
                 {
                     // Handle max range (int.MaxValue) - everything is in range
@@ -280,10 +130,10 @@ namespace StorageHub.Storage
 
                         if (inRange)
                         {
-                            int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                            int chestIndex = FindChestAtPosition(pos.x, pos.y);
                             if (chestIndex >= 0)
                             {
-                                AddChestItems(chests.GetValue(chestIndex), chestIndex, items);
+                                AddChestItems(chests[chestIndex], chestIndex, items);
                             }
                         }
                     }
@@ -303,47 +153,42 @@ namespace StorageHub.Storage
 
             try
             {
-                Array itemArray = null;
-                object item = null;
+                Item[] itemArray = null;
 
                 if (sourceChestIndex == SourceIndex.PlayerInventory)
                 {
                     var player = GetLocalPlayer();
-                    itemArray = _playerInventoryField?.GetValue(player) as Array;
+                    if (player != null) itemArray = player.inventory;
                 }
                 else if (sourceChestIndex == SourceIndex.PiggyBank)
                 {
                     var player = GetLocalPlayer();
-                    var bank = _playerBankField?.GetValue(player);
-                    itemArray = _chestItemField?.GetValue(bank) as Array;
+                    if (player != null) itemArray = player.bank.item;
                 }
                 else if (sourceChestIndex == SourceIndex.Safe)
                 {
                     var player = GetLocalPlayer();
-                    var bank = _playerBank2Field?.GetValue(player);
-                    itemArray = _chestItemField?.GetValue(bank) as Array;
+                    if (player != null) itemArray = player.bank2.item;
                 }
                 else if (sourceChestIndex == SourceIndex.DefendersForge)
                 {
                     var player = GetLocalPlayer();
-                    var bank = _playerBank3Field?.GetValue(player);
-                    itemArray = _chestItemField?.GetValue(bank) as Array;
+                    if (player != null) itemArray = player.bank3.item;
                 }
                 else if (sourceChestIndex == SourceIndex.VoidVault)
                 {
                     var player = GetLocalPlayer();
-                    var bank = _playerBank4Field?.GetValue(player);
-                    itemArray = _chestItemField?.GetValue(bank) as Array;
+                    if (player != null) itemArray = player.bank4.item;
                 }
                 else if (sourceChestIndex >= 0)
                 {
-                    var chests = _chestArrayField?.GetValue(null) as Array;
+                    var chests = Main.chest;
                     if (chests != null && sourceChestIndex < chests.Length)
                     {
-                        var chest = chests.GetValue(sourceChestIndex);
+                        var chest = chests[sourceChestIndex];
                         if (chest != null)
                         {
-                            itemArray = _chestItemField?.GetValue(chest) as Array;
+                            itemArray = chest.item;
                         }
                     }
                 }
@@ -353,18 +198,11 @@ namespace StorageHub.Storage
                 // Bounds check for sourceSlot
                 if (sourceSlot < 0 || sourceSlot >= itemArray.Length) return false;
 
-                item = itemArray.GetValue(sourceSlot);
+                var item = itemArray[sourceSlot];
                 if (item == null) return false;
 
-                // Validate required fields
-                if (_itemTypeField == null || _itemStackField == null) return false;
-
-                var itemTypeVal = _itemTypeField.GetValue(item);
-                var itemStackVal = _itemStackField.GetValue(item);
-                if (itemTypeVal == null || itemStackVal == null) return false;
-
-                int itemType = (int)itemTypeVal;
-                int itemStack = (int)itemStackVal;
+                int itemType = item.type;
+                int itemStack = item.stack;
 
                 if (itemType <= 0 || itemStack <= 0) return false;
 
@@ -378,15 +216,15 @@ namespace StorageHub.Storage
                 if (newStack <= 0)
                 {
                     // Clear the item
-                    _itemTypeField.SetValue(item, 0);
-                    _itemStackField.SetValue(item, 0);
+                    item.type = 0;
+                    item.stack = 0;
                 }
                 else
                 {
-                    _itemStackField.SetValue(item, newStack);
+                    item.stack = newStack;
                 }
 
-                // Update snapshot with actual taken count
+                // Update snapshot with actual taken count, preserving all category flags
                 taken = new ItemSnapshot(
                     taken.ItemId,
                     actualCount,
@@ -395,7 +233,16 @@ namespace StorageHub.Storage
                     taken.MaxStack,
                     taken.Rarity,
                     taken.SourceChestIndex,
-                    taken.SourceSlot
+                    taken.SourceSlot,
+                    taken.Damage,
+                    taken.IsPickaxe,
+                    taken.IsAxe,
+                    taken.IsHammer,
+                    taken.IsArmor,
+                    taken.IsAccessory,
+                    taken.IsConsumable,
+                    taken.IsPlaceable,
+                    taken.IsMaterial
                 );
 
                 _log.Debug($"Took {actualCount}x {taken.Name} from {SourceIndex.GetSourceName(sourceChestIndex)} slot {sourceSlot}");
@@ -414,7 +261,7 @@ namespace StorageHub.Storage
 
             try
             {
-                var chests = _chestArrayField?.GetValue(null) as Array;
+                var chests = Main.chest;
                 if (chests == null) return 0;
 
                 // Track how much we still need to deposit (item is readonly struct)
@@ -425,34 +272,26 @@ namespace StorageHub.Storage
                 {
                     if (remaining <= 0) break;
 
-                    int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                    int chestIndex = FindChestAtPosition(pos.x, pos.y);
                     if (chestIndex < 0) continue;
 
-                    var chest = chests.GetValue(chestIndex);
+                    var chest = chests[chestIndex];
                     if (chest == null) continue;
 
-                    var itemArray = _chestItemField?.GetValue(chest) as Array;
-                    if (itemArray == null) continue;
+                    var chestItems = chest.item;
+                    if (chestItems == null) continue;
 
-                    for (int i = 0; i < itemArray.Length; i++)
+                    for (int i = 0; i < chestItems.Length; i++)
                     {
                         if (remaining <= 0) break;
 
-                        var chestItem = itemArray.GetValue(i);
+                        var chestItem = chestItems[i];
                         if (chestItem == null) continue;
 
-                        // Safe GetValue with null checks
-                        var typeVal = _itemTypeField?.GetValue(chestItem);
-                        var stackVal = _itemStackField?.GetValue(chestItem);
-                        var prefixVal = _itemPrefixField?.GetValue(chestItem);
-                        var maxStackVal = _itemMaxStackField?.GetValue(chestItem);
-                        if (typeVal == null || stackVal == null || prefixVal == null || maxStackVal == null)
-                            continue;
-
-                        int type = (int)typeVal;
-                        int stack = (int)stackVal;
-                        int prefix = prefixVal is byte b ? b : Convert.ToInt32(prefixVal);
-                        int maxStack = (int)maxStackVal;
+                        int type = chestItem.type;
+                        int stack = chestItem.stack;
+                        int prefix = chestItem.prefix;
+                        int maxStack = chestItem.maxStack;
 
                         // Found matching item that can stack
                         if (type == item.ItemId && prefix == item.Prefix && stack < maxStack)
@@ -460,7 +299,7 @@ namespace StorageHub.Storage
                             int canAdd = maxStack - stack;
                             int toAdd = Math.Min(canAdd, remaining);
 
-                            _itemStackField.SetValue(chestItem, stack + toAdd);
+                            chestItem.stack = stack + toAdd;
                             depositedToChest = chestIndex;
                             remaining -= toAdd;
                             _log.Debug($"Stacked {toAdd}x {item.Name} into chest {chestIndex} slot {i}, {remaining} remaining");
@@ -479,42 +318,34 @@ namespace StorageHub.Storage
                 {
                     if (remaining <= 0) break;
 
-                    int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                    int chestIndex = FindChestAtPosition(pos.x, pos.y);
                     if (chestIndex < 0) continue;
 
-                    var chest = chests.GetValue(chestIndex);
+                    var chest = chests[chestIndex];
                     if (chest == null) continue;
 
-                    var itemArray = _chestItemField?.GetValue(chest) as Array;
-                    if (itemArray == null) continue;
+                    var chestItems = chest.item;
+                    if (chestItems == null) continue;
 
-                    for (int i = 0; i < itemArray.Length; i++)
+                    for (int i = 0; i < chestItems.Length; i++)
                     {
                         if (remaining <= 0) break;
 
-                        var chestItem = itemArray.GetValue(i);
+                        var chestItem = chestItems[i];
                         if (chestItem == null) continue;
 
-                        var typeVal = _itemTypeField?.GetValue(chestItem);
-                        if (typeVal == null) continue;
-
-                        int type = (int)typeVal;
+                        int type = chestItem.type;
                         if (type == 0)
                         {
                             // Empty slot - use SetDefaults to properly initialize all item fields
-                            if (!InvokeSetDefaults(chestItem, item.ItemId))
-                            {
-                                _log.Error("SetDefaults not available for DepositItem");
-                                continue;
-                            }
+                            chestItem.SetDefaults(item.ItemId);
 
                             // Get maxStack for this item type after SetDefaults
-                            var maxStackVal = _itemMaxStackField?.GetValue(chestItem);
-                            int maxStack = maxStackVal != null ? (int)maxStackVal : 9999;
+                            int maxStack = chestItem.maxStack;
                             if (maxStack <= 0) maxStack = 9999;
 
                             int toDeposit = Math.Min(remaining, maxStack);
-                            _itemStackField.SetValue(chestItem, toDeposit);
+                            chestItem.stack = toDeposit;
                             ApplyPrefix(chestItem, item.Prefix);
 
                             depositedToChest = chestIndex;
@@ -559,7 +390,7 @@ namespace StorageHub.Storage
                     return false;
                 }
 
-                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                var inventory = player.inventory;
                 if (inventory == null)
                 {
                     _log.Error("Cannot move to inventory: inventory not found");
@@ -578,27 +409,19 @@ namespace StorageHub.Storage
                 int mainSlots = Math.Min(inventory.Length, 50);
                 for (int i = 0; i < mainSlots && remaining > 0; i++)
                 {
-                    var slot = inventory.GetValue(i);
+                    var slot = inventory[i];
                     if (slot == null) continue;
 
-                    // Safe GetValue with null checks
-                    var typeVal = _itemTypeField?.GetValue(slot);
-                    var stackVal = _itemStackField?.GetValue(slot);
-                    var prefixVal = _itemPrefixField?.GetValue(slot);
-                    var maxStackVal = _itemMaxStackField?.GetValue(slot);
-                    if (typeVal == null || stackVal == null || prefixVal == null || maxStackVal == null)
-                        continue;
-
-                    int type = (int)typeVal;
-                    int stack = (int)stackVal;
-                    int prefix = prefixVal is byte b ? b : Convert.ToInt32(prefixVal);
-                    int maxStack = (int)maxStackVal;
+                    int type = slot.type;
+                    int stack = slot.stack;
+                    int prefix = slot.prefix;
+                    int maxStack = slot.maxStack;
 
                     if (type == taken.ItemId && prefix == taken.Prefix && stack < maxStack)
                     {
                         int canAdd = maxStack - stack;
                         int toAdd = Math.Min(canAdd, remaining);
-                        _itemStackField.SetValue(slot, stack + toAdd);
+                        slot.stack = stack + toAdd;
                         remaining -= toAdd;
                     }
                 }
@@ -606,27 +429,19 @@ namespace StorageHub.Storage
                 // Second pass: Find empty slot (cap at 50 = main inventory, skip coin/ammo slots)
                 for (int i = 0; i < mainSlots && remaining > 0; i++)
                 {
-                    var slot = inventory.GetValue(i);
+                    var slot = inventory[i];
                     if (slot == null) continue;
 
-                    var typeVal = _itemTypeField?.GetValue(slot);
-                    if (typeVal == null) continue;
-
-                    int type = (int)typeVal;
+                    int type = slot.type;
                     if (type == 0)
                     {
                         // Empty slot - use SetDefaults to properly initialize all item fields
-                        if (!InvokeSetDefaults(slot, taken.ItemId))
-                        {
-                            _log.Error("SetDefaults not available for MoveToInventory");
-                            break;
-                        }
+                        slot.SetDefaults(taken.ItemId);
                         // Cap at maxStack to prevent invalid stack sizes
-                        var maxStackVal = _itemMaxStackField?.GetValue(slot);
-                        int maxStack = maxStackVal != null ? (int)maxStackVal : 9999;
-                        if (maxStack <= 0) maxStack = 1;
+                        int maxStack = slot.maxStack;
+                        if (maxStack <= 0) maxStack = 9999;
                         int toPlace = Math.Min(remaining, maxStack);
-                        _itemStackField.SetValue(slot, toPlace);
+                        slot.stack = toPlace;
                         ApplyPrefix(slot, taken.Prefix);
                         remaining -= toPlace;
                     }
@@ -677,7 +492,7 @@ namespace StorageHub.Storage
 
             try
             {
-                var chests = _chestArrayField?.GetValue(null) as Array;
+                var chests = Main.chest;
                 if (chests == null) return result;
 
                 var player = GetLocalPlayer();
@@ -685,11 +500,11 @@ namespace StorageHub.Storage
 
                 foreach (var pos in _registry.GetRegisteredPositions())
                 {
-                    int chestIndex = FindChestAtPosition(chests, pos.x, pos.y);
+                    int chestIndex = FindChestAtPosition(pos.x, pos.y);
                     if (chestIndex >= 0)
                     {
-                        var chest = chests.GetValue(chestIndex);
-                        string name = _chestNameField?.GetValue(chest) as string ?? "";
+                        var chest = chests[chestIndex];
+                        string name = chest?.name ?? "";
 
                         // Calculate if in range
                         float dx = pos.x * 16 - playerPos.x;
@@ -702,16 +517,12 @@ namespace StorageHub.Storage
 
                         // Count non-empty items
                         int itemCount = 0;
-                        var itemArray = _chestItemField?.GetValue(chest) as Array;
-                        if (itemArray != null && _itemTypeField != null)
+                        if (chest != null && chest.item != null)
                         {
-                            for (int i = 0; i < itemArray.Length; i++)
+                            for (int i = 0; i < chest.item.Length; i++)
                             {
-                                var item = itemArray.GetValue(i);
-                                if (item == null) continue;
-                                var typeVal = _itemTypeField.GetValue(item);
-                                int type = typeVal != null ? (int)typeVal : 0;
-                                if (type > 0) itemCount++;
+                                var item = chest.item[i];
+                                if (item != null && item.type > 0) itemCount++;
                             }
                         }
 
@@ -731,21 +542,15 @@ namespace StorageHub.Storage
         {
             try
             {
-                var chests = _chestArrayField?.GetValue(null) as Array;
+                var chests = Main.chest;
                 if (chests == null || chestIndex < 0 || chestIndex >= chests.Length)
                     return false;
 
-                var chest = chests.GetValue(chestIndex);
+                var chest = chests[chestIndex];
                 if (chest == null) return false;
 
-                if (_chestXField == null || _chestYField == null) return false;
-
-                var xVal = _chestXField.GetValue(chest);
-                var yVal = _chestYField.GetValue(chest);
-                if (xVal == null || yVal == null) return false;
-
-                int x = (int)xVal;
-                int y = (int)yVal;
+                int x = chest.x;
+                int y = chest.y;
 
                 float dx = x * 16 - playerX;
                 float dy = y * 16 - playerY;
@@ -774,27 +579,15 @@ namespace StorageHub.Storage
             {
                 if (item.IsEmpty) return false;
 
-                if (_mouseItemField == null || _itemTypeField == null || _itemStackField == null || _itemPrefixField == null)
-                {
-                    _log.Error("PlaceOnCursor: Required fields not initialized");
-                    return false;
-                }
-
-                var mouseItem = _mouseItemField.GetValue(null);
+                var mouseItem = Main.mouseItem;
                 if (mouseItem == null)
                 {
                     _log.Error("Could not get Main.mouseItem");
                     return false;
                 }
 
-                // Check if cursor is empty (safe cast)
-                var currentTypeVal = _itemTypeField.GetValue(mouseItem);
-                if (currentTypeVal == null)
-                {
-                    _log.Error("Could not read mouseItem type");
-                    return false;
-                }
-                int currentType = (int)currentTypeVal;
+                // Check if cursor is empty
+                int currentType = mouseItem.type;
                 if (currentType != 0)
                 {
                     _log.Warn("Cursor not empty, cannot place item");
@@ -802,13 +595,8 @@ namespace StorageHub.Storage
                 }
 
                 // Set defaults for the item type (initializes all fields including fishingPole, damage, etc.)
-                if (!InvokeSetDefaults(mouseItem, item.ItemId))
-                {
-                    _log.Error("SetDefaults method not available - cannot place item");
-                    return false;
-                }
-
-                _itemStackField.SetValue(mouseItem, item.Stack);
+                mouseItem.SetDefaults(item.ItemId);
+                mouseItem.stack = item.Stack;
 
                 // Apply prefix via Prefix(int) method to get stat modifiers (damage, speed, etc.)
                 // This must happen AFTER SetDefaults which sets base stats
@@ -882,17 +670,9 @@ namespace StorageHub.Storage
         {
             try
             {
-                if (_mouseItemField == null || _itemTypeField == null)
-                    return true;
-
-                var mouseItem = _mouseItemField.GetValue(null);
+                var mouseItem = Main.mouseItem;
                 if (mouseItem == null) return true;
-
-                var typeVal = _itemTypeField.GetValue(mouseItem);
-                if (typeVal == null) return true;
-
-                int type = (int)typeVal;
-                return type == 0;
+                return mouseItem.type == 0;
             }
             catch
             {
@@ -903,49 +683,27 @@ namespace StorageHub.Storage
         // Helper methods
 
         /// <summary>
-        /// Invoke Item.SetDefaults with correct argument count.
-        /// SetDefaults(int Type, ItemVariant variant = null) has 2 params in 1.4.5.
-        /// </summary>
-        private static bool InvokeSetDefaults(object item, int type)
-        {
-            if (_itemSetDefaultsMethod == null) return false;
-            var paramCount = _itemSetDefaultsMethod.GetParameters().Length;
-            if (paramCount == 1)
-                _itemSetDefaultsMethod.Invoke(item, new object[] { type });
-            else
-                _itemSetDefaultsMethod.Invoke(item, new object[] { type, null });
-            return true;
-        }
-
-        /// <summary>
         /// Apply prefix stat modifiers via Item.Prefix(int) method.
         /// Must be called AFTER SetDefaults since it multiplies base stats.
         /// </summary>
-        private static void ApplyPrefix(object item, int prefix)
+        private static void ApplyPrefix(Item item, int prefix)
         {
-            if (prefix <= 0 || _itemPrefixMethod == null) return;
-            _itemPrefixMethod.Invoke(item, new object[] { prefix });
+            if (prefix <= 0) return;
+            item.Prefix(prefix);
         }
 
-        private object GetLocalPlayer()
+        private Player GetLocalPlayer()
         {
             try
             {
-                if (_myPlayerField == null || _playerArrayField == null)
-                    return null;
-
-                var myPlayerVal = _myPlayerField.GetValue(null);
-                if (myPlayerVal == null) return null;
-
-                int myPlayer = (int)myPlayerVal;
-                var players = _playerArrayField.GetValue(null) as Array;
+                int myPlayer = Main.myPlayer;
+                var players = Main.player;
                 if (players == null) return null;
 
-                // Bounds check before accessing array
                 if (myPlayer < 0 || myPlayer >= players.Length)
                     return null;
 
-                return players.GetValue(myPlayer);
+                return players[myPlayer];
             }
             catch
             {
@@ -953,68 +711,43 @@ namespace StorageHub.Storage
             }
         }
 
-        private (float x, float y) GetPlayerPosition(object player)
+        private (float x, float y) GetPlayerPosition(Player player)
         {
             try
             {
                 if (player == null) return (0, 0);
-
-                var position = _playerPositionField?.GetValue(player);
-                if (position != null)
-                {
-                    var posType = position.GetType();
-                    var xField = posType.GetField("X");
-                    var yField = posType.GetField("Y");
-
-                    if (xField == null || yField == null) return (0, 0);
-
-                    var xVal = xField.GetValue(position);
-                    var yVal = yField.GetValue(position);
-
-                    if (xVal == null || yVal == null) return (0, 0);
-
-                    float x = Convert.ToSingle(xVal);
-                    float y = Convert.ToSingle(yVal);
-                    return (x, y);
-                }
+                return (player.position.X, player.position.Y);
             }
             catch { }
             return (0, 0);
         }
 
-        private int FindChestAtPosition(Array chests, int x, int y)
+        private int FindChestAtPosition(int x, int y)
         {
+            var chests = Main.chest;
             if (chests == null) return -1;
-            if (_chestXField == null || _chestYField == null) return -1;
 
             for (int i = 0; i < chests.Length; i++)
             {
-                var chest = chests.GetValue(i);
+                var chest = chests[i];
                 if (chest == null) continue;
 
-                var chestXVal = _chestXField.GetValue(chest);
-                var chestYVal = _chestYField.GetValue(chest);
-                if (chestXVal == null || chestYVal == null) continue;
-
-                int chestX = (int)chestXVal;
-                int chestY = (int)chestYVal;
-
-                if (chestX == x && chestY == y)
+                if (chest.x == x && chest.y == y)
                     return i;
             }
             return -1;
         }
 
-        private void AddInventoryItems(object player, List<ItemSnapshot> items)
+        private void AddInventoryItems(Player player, List<ItemSnapshot> items)
         {
             try
             {
-                var inventory = _playerInventoryField?.GetValue(player) as Array;
+                var inventory = player.inventory;
                 if (inventory == null) return;
 
                 for (int i = 0; i < Math.Min(inventory.Length, 50); i++)
                 {
-                    var item = inventory.GetValue(i);
+                    var item = inventory[i];
                     var snapshot = CreateSnapshot(item, SourceIndex.PlayerInventory, i);
                     if (!snapshot.IsEmpty)
                     {
@@ -1028,69 +761,61 @@ namespace StorageHub.Storage
             }
         }
 
-        private void AddBankItems(object player, List<ItemSnapshot> items)
+        private void AddBankItems(Player player, List<ItemSnapshot> items)
         {
             try
             {
                 // Piggy bank
-                var bank = _playerBankField?.GetValue(player);
-                if (bank != null)
+                if (player.bank != null)
                 {
-                    var bankItems = _chestItemField?.GetValue(bank) as Array;
+                    var bankItems = player.bank.item;
                     if (bankItems != null)
                     {
                         for (int i = 0; i < bankItems.Length; i++)
                         {
-                            var item = bankItems.GetValue(i);
-                            var snapshot = CreateSnapshot(item, SourceIndex.PiggyBank, i);
+                            var snapshot = CreateSnapshot(bankItems[i], SourceIndex.PiggyBank, i);
                             if (!snapshot.IsEmpty) items.Add(snapshot);
                         }
                     }
                 }
 
                 // Safe
-                var bank2 = _playerBank2Field?.GetValue(player);
-                if (bank2 != null)
+                if (player.bank2 != null)
                 {
-                    var bank2Items = _chestItemField?.GetValue(bank2) as Array;
+                    var bank2Items = player.bank2.item;
                     if (bank2Items != null)
                     {
                         for (int i = 0; i < bank2Items.Length; i++)
                         {
-                            var item = bank2Items.GetValue(i);
-                            var snapshot = CreateSnapshot(item, SourceIndex.Safe, i);
+                            var snapshot = CreateSnapshot(bank2Items[i], SourceIndex.Safe, i);
                             if (!snapshot.IsEmpty) items.Add(snapshot);
                         }
                     }
                 }
 
                 // Defender's Forge
-                var bank3 = _playerBank3Field?.GetValue(player);
-                if (bank3 != null)
+                if (player.bank3 != null)
                 {
-                    var bank3Items = _chestItemField?.GetValue(bank3) as Array;
+                    var bank3Items = player.bank3.item;
                     if (bank3Items != null)
                     {
                         for (int i = 0; i < bank3Items.Length; i++)
                         {
-                            var item = bank3Items.GetValue(i);
-                            var snapshot = CreateSnapshot(item, SourceIndex.DefendersForge, i);
+                            var snapshot = CreateSnapshot(bank3Items[i], SourceIndex.DefendersForge, i);
                             if (!snapshot.IsEmpty) items.Add(snapshot);
                         }
                     }
                 }
 
                 // Void Vault
-                var bank4 = _playerBank4Field?.GetValue(player);
-                if (bank4 != null)
+                if (player.bank4 != null)
                 {
-                    var bank4Items = _chestItemField?.GetValue(bank4) as Array;
+                    var bank4Items = player.bank4.item;
                     if (bank4Items != null)
                     {
                         for (int i = 0; i < bank4Items.Length; i++)
                         {
-                            var item = bank4Items.GetValue(i);
-                            var snapshot = CreateSnapshot(item, SourceIndex.VoidVault, i);
+                            var snapshot = CreateSnapshot(bank4Items[i], SourceIndex.VoidVault, i);
                             if (!snapshot.IsEmpty) items.Add(snapshot);
                         }
                     }
@@ -1102,17 +827,17 @@ namespace StorageHub.Storage
             }
         }
 
-        private void AddChestItems(object chest, int chestIndex, List<ItemSnapshot> items)
+        private void AddChestItems(Chest chest, int chestIndex, List<ItemSnapshot> items)
         {
             try
             {
-                var itemArray = _chestItemField?.GetValue(chest) as Array;
+                if (chest == null) return;
+                var itemArray = chest.item;
                 if (itemArray == null) return;
 
                 for (int i = 0; i < itemArray.Length; i++)
                 {
-                    var item = itemArray.GetValue(i);
-                    var snapshot = CreateSnapshot(item, chestIndex, i);
+                    var snapshot = CreateSnapshot(itemArray[i], chestIndex, i);
                     if (!snapshot.IsEmpty)
                     {
                         items.Add(snapshot);
@@ -1125,59 +850,36 @@ namespace StorageHub.Storage
             }
         }
 
-        private ItemSnapshot CreateSnapshot(object item, int sourceChestIndex, int sourceSlot)
+        private ItemSnapshot CreateSnapshot(Item item, int sourceChestIndex, int sourceSlot)
         {
             try
             {
                 if (item == null) return default;
 
-                // Validate required fields exist
-                if (_itemTypeField == null || _itemStackField == null ||
-                    _itemPrefixField == null || _itemMaxStackField == null || _itemRarityField == null)
-                    return default;
-
-                // Safe GetValue with null checks
-                var itemTypeVal = _itemTypeField.GetValue(item);
-                if (itemTypeVal == null) return default;
-                int itemType = (int)itemTypeVal;
+                int itemType = item.type;
                 if (itemType <= 0) return default;
 
-                var stackVal = _itemStackField.GetValue(item);
-                if (stackVal == null) return default;
-                int stack = (int)stackVal;
+                int stack = item.stack;
                 if (stack <= 0) return default;
 
-                var prefixVal = _itemPrefixField.GetValue(item);
-                int prefix = 0;
-                if (prefixVal != null)
-                {
-                    if (prefixVal is byte b)
-                        prefix = b;
-                    else
-                        prefix = Convert.ToInt32(prefixVal);
-                }
+                int prefix = item.prefix;
+                string name = item.Name ?? "";
+                int maxStack = item.maxStack;
+                int rarity = item.rare;
 
-                string name = _itemNameProp?.GetValue(item)?.ToString() ?? "";
-
-                var maxStackVal = _itemMaxStackField.GetValue(item);
-                int maxStack = maxStackVal != null ? (int)maxStackVal : 999;
-
-                var rarityVal = _itemRarityField.GetValue(item);
-                int rarity = rarityVal != null ? (int)rarityVal : 0;
-
-                // Get category info with safe casts
-                int damage = GetSafeInt(_itemDamageField, item, 0);
-                int pick = GetSafeInt(_itemPickField, item, 0);
-                int axe = GetSafeInt(_itemAxeField, item, 0);
-                int hammer = GetSafeInt(_itemHammerField, item, 0);
-                int headSlot = GetSafeInt(_itemHeadSlotField, item, -1);
-                int bodySlot = GetSafeInt(_itemBodySlotField, item, -1);
-                int legSlot = GetSafeInt(_itemLegSlotField, item, -1);
-                bool accessory = GetSafeBool(_itemAccessoryField, item);
-                bool consumable = GetSafeBool(_itemConsumableField, item);
-                int createTile = GetSafeInt(_itemCreateTileField, item, -1);
-                int createWall = GetSafeInt(_itemCreateWallField, item, -1);
-                bool material = GetSafeBool(_itemMaterialField, item);
+                // Get category info
+                int damage = item.damage;
+                int pick = item.pick;
+                int axe = item.axe;
+                int hammer = item.hammer;
+                int headSlot = item.headSlot;
+                int bodySlot = item.bodySlot;
+                int legSlot = item.legSlot;
+                bool accessory = item.accessory;
+                bool consumable = item.consumable;
+                int createTile = item.createTile;
+                int createWall = item.createWall;
+                bool material = item.material;
 
                 return new ItemSnapshot(
                     itemType,
@@ -1203,42 +905,6 @@ namespace StorageHub.Storage
             {
                 _log.Error($"Error creating snapshot: {ex.Message}");
                 return default;
-            }
-        }
-
-        /// <summary>
-        /// Safely get an int value from a field, returning default if null or failed.
-        /// </summary>
-        private int GetSafeInt(FieldInfo field, object obj, int defaultValue)
-        {
-            if (field == null) return defaultValue;
-            try
-            {
-                var val = field.GetValue(obj);
-                if (val == null) return defaultValue;
-                return (int)val;
-            }
-            catch
-            {
-                return defaultValue;
-            }
-        }
-
-        /// <summary>
-        /// Safely get a bool value from a field, returning false if null or failed.
-        /// </summary>
-        private bool GetSafeBool(FieldInfo field, object obj)
-        {
-            if (field == null) return false;
-            try
-            {
-                var val = field.GetValue(obj);
-                if (val == null) return false;
-                return (bool)val;
-            }
-            catch
-            {
-                return false;
             }
         }
     }

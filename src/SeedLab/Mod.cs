@@ -8,7 +8,7 @@ using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Input;
 using TerrariaModder.Core.Logging;
-using TerrariaModder.Core.Reflection;
+using Terraria;
 using TerrariaModder.Core.UI;
 
 namespace SeedLab
@@ -137,7 +137,7 @@ namespace SeedLab
         {
             // In menu: poll keyboard manually (KeybindManager doesn't update in menus)
             // and handle F10 for world-gen panel
-            if (Game.InMenu)
+            if (Main.gameMenu)
             {
                 PollMenuInput();
                 _worldGenPanel?.Draw();

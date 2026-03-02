@@ -2,9 +2,9 @@ using System;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
+using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Logging;
-using TerrariaModder.Core.Reflection;
 
 namespace SkipIntro
 {
@@ -18,7 +18,6 @@ namespace SkipIntro
         private Harmony _harmony;
         private Timer _patchTimer;
         private static bool _hasSkipped = false;
-        private static FieldInfo _showSplashField;
         private static FieldInfo _isAsyncLoadCompleteField;
         private static FieldInfo _splashCounterField;
         private static ILogger _staticLog;
@@ -48,26 +47,16 @@ namespace SkipIntro
         {
             try
             {
-                var mainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
+                // _isAsyncLoadComplete and splashCounter are private — must use reflection
+                _isAsyncLoadCompleteField = typeof(Main).GetField("_isAsyncLoadComplete", BindingFlags.NonPublic | BindingFlags.Static);
+                _splashCounterField = typeof(Main).GetField("splashCounter", BindingFlags.NonPublic | BindingFlags.Instance);
 
-                if (mainType == null)
+                if (_isAsyncLoadCompleteField == null)
                 {
-                    _log.Error("Could not find Terraria.Main type");
-                    return;
+                    _log.Warn("Could not find _isAsyncLoadComplete field");
                 }
 
-                _showSplashField = mainType.GetField("showSplash", BindingFlags.Public | BindingFlags.Static);
-                _isAsyncLoadCompleteField = mainType.GetField("_isAsyncLoadComplete", BindingFlags.NonPublic | BindingFlags.Static);
-                _splashCounterField = mainType.GetField("splashCounter", BindingFlags.NonPublic | BindingFlags.Instance);
-
-                if (_showSplashField == null)
-                {
-                    _log.Warn("Could not find showSplash field - intro skip may not work");
-                    return;
-                }
-
-                var doUpdateMethod = mainType.GetMethod("DoUpdate", BindingFlags.NonPublic | BindingFlags.Instance);
+                var doUpdateMethod = typeof(Main).GetMethod("DoUpdate", BindingFlags.NonPublic | BindingFlags.Instance);
                 if (doUpdateMethod != null)
                 {
                     var postfix = typeof(Mod).GetMethod("DoUpdate_Postfix", BindingFlags.Public | BindingFlags.Static);
@@ -85,14 +74,13 @@ namespace SkipIntro
             }
         }
 
-        public static void DoUpdate_Postfix(object __instance)
+        public static void DoUpdate_Postfix(Main __instance)
         {
             try
             {
                 if (_hasSkipped) return;
 
-                bool showSplash = (bool)_showSplashField.GetValue(null);
-                if (!showSplash)
+                if (!Main.showSplash)
                 {
                     _hasSkipped = true;
                     return;
@@ -111,7 +99,7 @@ namespace SkipIntro
                         }
                         else
                         {
-                            _showSplashField.SetValue(null, false);
+                            Main.showSplash = false;
                             _hasSkipped = true;
                             _staticLog?.Info("Intro splash skipped (fallback)");
                         }
@@ -135,7 +123,6 @@ namespace SkipIntro
 
             // Reset static state for hot-reload support
             _hasSkipped = false;
-            _showSplashField = null;
             _isAsyncLoadCompleteField = null;
             _splashCounterField = null;
             _staticLog = null;

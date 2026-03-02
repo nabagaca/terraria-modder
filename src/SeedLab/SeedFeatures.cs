@@ -33,6 +33,11 @@ namespace SeedLab
         public const string Target_Spawner_GetSpawnRate = "Spawner.GetSpawnRate";
         public const string Target_Spawner_SpawnNPC = "Spawner.SpawnNPC";
         public const string Target_Player_UpdateBuffs = "Player.UpdateBuffs";
+        public const string Target_Player_PickTile = "Player.PickTile";
+        public const string Target_WorldGen_ShakeTree = "WorldGen.ShakeTree";
+        public const string Target_Projectile_SetDefaults = "Projectile.SetDefaults";
+        public const string Target_Projectile_AI = "Projectile.AI";
+        public const string Target_Projectile_FishingCheck = "Projectile.FishingCheck";
         public const string Target_Global = "Global"; // No per-method patch; global toggle only
 
         /// <summary>
@@ -53,8 +58,30 @@ namespace SeedLab
                 }),
                 new FeatureGroupDefinition("ftw_spawning", "Spawn Rates", "Enemies spawn faster and in greater numbers", new[]
                 {
-                    new FeatureDefinition("ftw_spawn_rate", "Spawn Rate x0.8, Max x1.2", "GetSpawnRate: 20% faster spawns, 20% more enemies", Target_Spawner_GetSpawnRate, GetGoodWorld, true),
+                    new FeatureDefinition("ftw_spawn_rate", "Spawn Rate x0.8, Max x1.2", "GetSpawnRate: spawnRate * 0.8, maxSpawns * 1.2", Target_Spawner_GetSpawnRate, GetGoodWorld, true),
                     new FeatureDefinition("ftw_spawn_npc", "Spawn NPC Changes", "Spider spawn logic and other NPC spawn tweaks", Target_Spawner_SpawnNPC, GetGoodWorld, true),
+                }),
+                new FeatureGroupDefinition("ftw_tree_bombs", "Tree Bombs", "Trees drop bomb projectiles when shaken", new[]
+                {
+                    new FeatureDefinition("ftw_tree_bomb_drop", "Tree Bomb Drops", "WorldGen.ShakeTree: 1/17 chance to drop bomb (type 28) when shaking trees", Target_WorldGen_ShakeTree, GetGoodWorld, true),
+                }),
+                new FeatureGroupDefinition("ftw_difficulty", "Difficulty Scaling", "Main.Difficulty adds +1 to world difficulty (Classic->Expert, Expert->Master, Master->Legendary)", new[]
+                {
+                    new FeatureDefinition("ftw_difficulty_plus1", "Difficulty +1", "All stat scaling game-wide shifts up one tier via Main.Difficulty getter", Target_Global, GetGoodWorld, true),
+                }),
+                new FeatureGroupDefinition("ftw_mining", "Mining Changes", "Double pickaxe damage against all tiles", new[]
+                {
+                    new FeatureDefinition("ftw_pickaxe_damage", "Double Pickaxe Damage", "Player.PickTile_DetermineDamage: damage *= 2 against all tiles", Target_Player_PickTile, GetGoodWorld, true),
+                }),
+                new FeatureGroupDefinition("ftw_projectiles", "Projectile Changes", "Star projectiles become hostile, boss star reflection, grenade bounce changes", new[]
+                {
+                    new FeatureDefinition("ftw_projectile_defaults", "Hostile Stars & Grenades", "Projectile.SetDefaults: falling stars become hostile+friendly, grenade properties changed", Target_Projectile_SetDefaults, GetGoodWorld, true),
+                    new FeatureDefinition("ftw_projectile_ai", "Boss Star Reflection & Bounce", "Projectile.AI: ReflectStarShotsInForTheWorthy bosses reflect stars, grenade bounce behavior", Target_Projectile_AI, GetGoodWorld, true),
+                }),
+                new FeatureGroupDefinition("ftw_cross_seed", "Cross-Seed Effects", "Special behaviors requiring FTW + other seeds active simultaneously", new[]
+                {
+                    new FeatureDefinition("ftw_bosses_keep_spawning", "Bosses Keep Spawning", "SpecialSeedFeatures.BossesKeepSpawning: requires Don't Starve ON + Celebration OFF", Target_Global, GetGoodWorld, true),
+                    new FeatureDefinition("ftw_mechdusa", "Mechdusa", "SpecialSeedFeatures.Mechdusa: Mechdusa boss variant, requires Remix ON", Target_Global, GetGoodWorld, true),
                 }),
             }),
 
@@ -68,13 +95,25 @@ namespace SeedLab
                 {
                     new FeatureDefinition("ds_spawn_depth", "Expanded Spawn Depth", "Spawner.SpawnNPC: allows NPC spawns deeper in cavern layer", Target_Spawner_SpawnNPC, DontStarveWorld, true),
                 }),
+                new FeatureGroupDefinition("ds_darkness", "Darkness Damage", "250 damage per hit after 120 frames in complete darkness (core DS mechanic)", new[]
+                {
+                    new FeatureDefinition("ds_darkness_damage", "Darkness Damage", "DontStarveDarknessDamageDealer.Update: 250 damage per hit in prolonged darkness", Target_Global, DontStarveWorld, true),
+                }),
+                new FeatureGroupDefinition("ds_night_lighting", "Night Lighting", "Pitch black nights except during full moon; blood moon adds some brightness", new[]
+                {
+                    new FeatureDefinition("ds_night_darkness", "Dark Nights", "DontStarveSeed: ModifyNightColor + ModifyMinimumLightColorAtNight + FixBiomeDarkness", Target_Global, DontStarveWorld, true),
+                }),
+                new FeatureGroupDefinition("ds_death_sounds", "Death Sounds", "Don't Starve Together style death sounds", new[]
+                {
+                    new FeatureDefinition("ds_death_sound", "DST Death Sounds", "Player.PlayDeathSound: plays DST male/female hurt sounds on death", Target_Global, DontStarveWorld, true),
+                }),
             }),
 
             new SeedDefinition("ntb", "Not the Bees", NotTheBeesWorld, new[]
             {
                 new FeatureGroupDefinition("ntb_ai", "NPC Behavior", "Modified NPC AI with bee-related changes", new[]
                 {
-                    new FeatureDefinition("ntb_npc_ai", "NPC AI Changes", "Spider spawning and slime drop modifications in NPC.AI", Target_NPC_AI, NotTheBeesWorld, true),
+                    new FeatureDefinition("ntb_npc_ai", "NPC AI Changes", "NPC.AI: spider cocoon/egg-sac spawning, slime behavior in bee-themed worlds", Target_NPC_AI, NotTheBeesWorld, true),
                 }),
             }),
 
@@ -94,13 +133,17 @@ namespace SeedLab
                     new FeatureDefinition("remix_spawn_rate", "Flipped Spawn Rates", "Spawn rate adjustments for flipped depth zones", Target_Spawner_GetSpawnRate, RemixWorld, true),
                     new FeatureDefinition("remix_spawn_npc", "Flipped NPC Selection", "Which NPCs spawn at which depths is inverted", Target_Spawner_SpawnNPC, RemixWorld, true),
                 }),
+                new FeatureGroupDefinition("remix_fishing", "Fishing Changes", "Surface corruption/crimson fishing disabled, remix ocean fishing at depth", new[]
+                {
+                    new FeatureDefinition("remix_fishing_loot", "Remix Fishing Loot", "Projectile.FishingCheck: disables corruption/crimson at surface, adds deep ocean remix fish", Target_Projectile_FishingCheck, RemixWorld, true),
+                }),
             }),
 
             new SeedDefinition("zenith", "Zenith", ZenithWorld, new[]
             {
                 new FeatureGroupDefinition("zenith_scaling", "Star Difficulty", "Comprehensive NPC stat scaling for maximum challenge", new[]
                 {
-                    new FeatureDefinition("zenith_npc_scaling", "Zenith NPC Scaling", "getZenithSeedAdjustmentsBeforeEverything: all NPCs get stat boosts", Target_NPC_SetDefaults, ZenithWorld, true),
+                    new FeatureDefinition("zenith_npc_scaling", "Zenith NPC Scaling", "getZenithSeedAdjustmentsBeforeEverything: reduces life to 0.8x for specific NPCs (slimes 125-131, Duke Fishron 370)", Target_NPC_SetDefaults, ZenithWorld, true),
                 }),
             }),
 
@@ -113,6 +156,14 @@ namespace SeedLab
                 new FeatureGroupDefinition("celebration_spawning", "Spawn Changes", "Fairy spawning, jungle mimics, and special creature frequency", new[]
                 {
                     new FeatureDefinition("celebration_spawn_npc", "Celebration Spawn Effects", "Fairy spawning, jungle mimics, modified creature frequency", Target_Spawner_SpawnNPC, TenthAnniversaryWorld, true),
+                }),
+                new FeatureGroupDefinition("celebration_tree_bombs", "Anniversary Bombs", "Trees drop Anniversary Bomb (type 75) instead of normal bomb, doubled chance", new[]
+                {
+                    new FeatureDefinition("celebration_tree_bomb_type", "Anniversary Tree Bombs", "WorldGen.ShakeTree: bomb type changed to 75, chance doubled (1/34 instead of 1/17)", Target_WorldGen_ShakeTree, TenthAnniversaryWorld, true),
+                }),
+                new FeatureGroupDefinition("celebration_dev_armor", "Dev Armor Rate", "Dev armor drop rate doubled (1/8 instead of 1/16)", new[]
+                {
+                    new FeatureDefinition("celebration_dev_rate", "Dev Armor 1/8", "Player.TryGettingDevArmor: drop chance 1/8 instead of 1/16", Target_Global, TenthAnniversaryWorld, true),
                 }),
             }),
 
@@ -128,7 +179,7 @@ namespace SeedLab
             {
                 new FeatureGroupDefinition("skyblock_mode", "Skyblock Mode", "World generated as floating islands — worldgen only, no runtime effects", new[]
                 {
-                    new FeatureDefinition("skyblock_flag", "Skyblock Flag", "Main.skyblockWorld flag (no runtime gameplay effects, worldgen only)", Target_Global, SkyblockWorld, true),
+                    new FeatureDefinition("skyblock_flag", "Skyblock Flag", "Main.skyblockWorld flag (no runtime gameplay effects, worldgen only)", Target_Global, SkyblockWorld, false),
                 }),
             }),
 

@@ -2,6 +2,8 @@ using System;
 using System.Reflection;
 using System.Threading;
 using HarmonyLib;
+using Microsoft.Xna.Framework;
+using Terraria;
 using TerrariaModder.Core;
 using TerrariaModder.Core.Events;
 using TerrariaModder.Core.Input;
@@ -73,72 +75,10 @@ namespace AdminPanel
         private static int _moveSpeedMultiplier = 1;
         private static bool _biomeSpreadDisabled;
 
-        // Biome spread reflection
-        private static FieldInfo _allowedToSpreadInfectionsField;
-
         private static Harmony _harmony;
         private static Timer _patchTimer;
         private static readonly object _patchLock = new object();
         private static bool _patchesApplied;
-
-        #endregion
-
-        #region Reflection Cache
-
-        private static Type _mainType;
-        private static Type _playerType;
-        private static Type _vector2Type;
-
-        // Main fields
-        private static FieldInfo _netModeField;
-        private static FieldInfo _myPlayerField;
-        private static FieldInfo _playerArrayField;
-        private static FieldInfo _dayTimeField;
-        private static FieldInfo _timeField;
-        private static FieldInfo _dayRateField;
-        private static FieldInfo _spawnTileXField;
-        private static FieldInfo _spawnTileYField;
-        private static FieldInfo _dungeonXField;
-        private static FieldInfo _dungeonYField;
-        private static FieldInfo _maxTilesXField;
-        private static FieldInfo _maxTilesYField;
-        private static FieldInfo _worldSurfaceField;
-
-        // Player fields
-        private static FieldInfo _statLifeField;
-        private static FieldInfo _statLifeMax2Field;
-        private static FieldInfo _statManaField;
-        private static FieldInfo _statManaMax2Field;
-        private static FieldInfo _spawnXField;
-        private static FieldInfo _spawnYField;
-        private static FieldInfo _immuneField;
-        private static FieldInfo _immuneTimeField;
-        private static FieldInfo _immuneNoBlink;
-        private static FieldInfo _respawnTimerField;
-        private static FieldInfo _positionField;
-        private static PropertyInfo _playerCenterProp;
-        private static MethodInfo _teleportMethod;
-
-        // Movement speed fields
-        private static FieldInfo _maxRunSpeedField;
-        private static FieldInfo _runAccelerationField;
-
-        // Vanilla teleport methods (shellphone-matching destinations)
-        private static MethodInfo _shellphoneSpawnMethod;
-        private static MethodInfo _magicConchMethod;
-        private static MethodInfo _demonConchMethod;
-        private static MethodInfo _teleportationPotionMethod;
-
-        // Vector2 fields
-        private static FieldInfo _vector2XField;
-        private static FieldInfo _vector2YField;
-
-        // NPC fields (for boss detection)
-        private static FieldInfo _npcArrayField;
-        private static FieldInfo _npcActiveField;
-        private static FieldInfo _npcBossField;
-        private static FieldInfo _npcTypeField;
-        private static PropertyInfo _npcCenterProp;
 
         #endregion
 
@@ -158,18 +98,20 @@ namespace AdminPanel
                 return;
             }
 
-            InitReflection();
             LoadSettings();
 
             context.RegisterKeybind("toggle", "Toggle Panel", "Open/close admin panel", "OemBackslash", OnToggleUI);
             context.RegisterKeybind("god-mode", "Toggle God Mode", "Toggle invincibility", "F9", OnToggleGodMode);
 
+            _panel.ClipContent = false; // Content fits within panel; BeginClip causes transform issues
             _panel.RegisterDrawCallback(OnDraw);
             FrameEvents.OnPreUpdate += ExecutePendingAction;
             FrameEvents.OnPreUpdate += UpdateNPCSpawner;
 
             _harmony = new Harmony("com.terrariamodder.adminpanel");
             _patchTimer = new Timer(ApplyPatches, null, 5000, Timeout.Infinite);
+
+            NPCSpawner.Init(_log);
 
             _log.Info("AdminPanel initialized - Press \\ to open panel, F9 for god mode");
         }
@@ -187,9 +129,9 @@ namespace AdminPanel
             _panel.Close();
             _inBossFight = false;
             // Reset game state but keep settings
-            try { _dayRateField?.SetValue(null, 1); } catch { }
+            try { Main.dayRate = 1; } catch { }
             // Restore biome spread for save safety
-            try { _allowedToSpreadInfectionsField?.SetValue(null, true); } catch { }
+            try { WorldGen.AllowedToSpreadInfections = true; } catch { }
         }
 
         public void Unload()
@@ -208,10 +150,9 @@ namespace AdminPanel
             _moveSpeedMultiplier = 1;
             _biomeSpreadDisabled = false;
             // Restore biome spread on unload
-            try { _allowedToSpreadInfectionsField?.SetValue(null, true); } catch { }
-            try { _dayRateField?.SetValue(null, 1); } catch { }
+            try { WorldGen.AllowedToSpreadInfections = true; } catch { }
+            try { Main.dayRate = 1; } catch { }
             NPCSpawner.Unload();
-            ClearReflectionCache();
             _log.Info("AdminPanel unloaded");
         }
 
@@ -283,150 +224,6 @@ namespace AdminPanel
             }
         }
 
-        private void InitReflection()
-        {
-            try
-            {
-                _mainType = Type.GetType("Terraria.Main, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Main");
-                _playerType = Type.GetType("Terraria.Player, Terraria")
-                    ?? Assembly.Load("Terraria").GetType("Terraria.Player");
-
-                if (_mainType != null)
-                {
-                    _netModeField = _mainType.GetField("netMode", BindingFlags.Public | BindingFlags.Static);
-                    _myPlayerField = _mainType.GetField("myPlayer", BindingFlags.Public | BindingFlags.Static);
-                    _playerArrayField = _mainType.GetField("player", BindingFlags.Public | BindingFlags.Static);
-                    _dayTimeField = _mainType.GetField("dayTime", BindingFlags.Public | BindingFlags.Static);
-                    _timeField = _mainType.GetField("time", BindingFlags.Public | BindingFlags.Static);
-                    _dayRateField = _mainType.GetField("dayRate", BindingFlags.Public | BindingFlags.Static);
-                    _spawnTileXField = _mainType.GetField("spawnTileX", BindingFlags.Public | BindingFlags.Static);
-                    _spawnTileYField = _mainType.GetField("spawnTileY", BindingFlags.Public | BindingFlags.Static);
-                    _dungeonXField = _mainType.GetField("dungeonX", BindingFlags.Public | BindingFlags.Static);
-                    _dungeonYField = _mainType.GetField("dungeonY", BindingFlags.Public | BindingFlags.Static);
-                    _maxTilesXField = _mainType.GetField("maxTilesX", BindingFlags.Public | BindingFlags.Static);
-                    _maxTilesYField = _mainType.GetField("maxTilesY", BindingFlags.Public | BindingFlags.Static);
-                    _worldSurfaceField = _mainType.GetField("worldSurface", BindingFlags.Public | BindingFlags.Static);
-                }
-
-                if (_playerType != null)
-                {
-                    _statLifeField = _playerType.GetField("statLife", BindingFlags.Public | BindingFlags.Instance);
-                    _statLifeMax2Field = _playerType.GetField("statLifeMax2", BindingFlags.Public | BindingFlags.Instance);
-                    _statManaField = _playerType.GetField("statMana", BindingFlags.Public | BindingFlags.Instance);
-                    _statManaMax2Field = _playerType.GetField("statManaMax2", BindingFlags.Public | BindingFlags.Instance);
-                    _spawnXField = _playerType.GetField("SpawnX", BindingFlags.Public | BindingFlags.Instance);
-                    _spawnYField = _playerType.GetField("SpawnY", BindingFlags.Public | BindingFlags.Instance);
-                    _immuneField = _playerType.GetField("immune", BindingFlags.Public | BindingFlags.Instance);
-                    _immuneTimeField = _playerType.GetField("immuneTime", BindingFlags.Public | BindingFlags.Instance);
-                    _immuneNoBlink = _playerType.GetField("immuneNoBlink", BindingFlags.Public | BindingFlags.Instance);
-                    _respawnTimerField = _playerType.GetField("respawnTimer", BindingFlags.Public | BindingFlags.Instance);
-                    _positionField = _playerType.GetField("position", BindingFlags.Public | BindingFlags.Instance);
-                    _playerCenterProp = _playerType.GetProperty("Center", BindingFlags.Public | BindingFlags.Instance);
-
-                    // Movement speed fields
-                    _maxRunSpeedField = _playerType.GetField("maxRunSpeed", BindingFlags.Public | BindingFlags.Instance);
-                    _runAccelerationField = _playerType.GetField("runAcceleration", BindingFlags.Public | BindingFlags.Instance);
-
-                    // Find Player.Teleport(Vector2, int, int)
-                    foreach (var method in _playerType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
-                    {
-                        if (method.Name == "Teleport")
-                        {
-                            var parms = method.GetParameters();
-                            if (parms.Length >= 1 && parms[0].ParameterType.Name == "Vector2")
-                            {
-                                _teleportMethod = method;
-                                _vector2Type = parms[0].ParameterType;
-                                _vector2XField = _vector2Type.GetField("X");
-                                _vector2YField = _vector2Type.GetField("Y");
-                                break;
-                            }
-                        }
-                    }
-
-                    // Vanilla teleport methods (exact shellphone behavior)
-                    _shellphoneSpawnMethod = _playerType.GetMethod("Shellphone_Spawn", BindingFlags.Public | BindingFlags.Instance);
-                    _magicConchMethod = _playerType.GetMethod("MagicConch", BindingFlags.Public | BindingFlags.Instance);
-                    _demonConchMethod = _playerType.GetMethod("DemonConch", BindingFlags.Public | BindingFlags.Instance);
-                    _teleportationPotionMethod = _playerType.GetMethod("TeleportationPotion", BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                // NPC fields for boss detection
-                var npcType = _mainType?.Assembly.GetType("Terraria.NPC");
-                if (npcType != null)
-                {
-                    _npcArrayField = _mainType.GetField("npc", BindingFlags.Public | BindingFlags.Static);
-                    _npcActiveField = npcType.GetField("active", BindingFlags.Public | BindingFlags.Instance);
-                    _npcBossField = npcType.GetField("boss", BindingFlags.Public | BindingFlags.Instance);
-                    _npcTypeField = npcType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
-                    _npcCenterProp = npcType.GetProperty("Center", BindingFlags.Public | BindingFlags.Instance);
-                }
-
-                // Biome spread control
-                var worldGenType = _mainType?.Assembly.GetType("Terraria.WorldGen");
-                if (worldGenType != null)
-                    _allowedToSpreadInfectionsField = worldGenType.GetField("AllowedToSpreadInfections", BindingFlags.Public | BindingFlags.Static);
-
-                // Initialize NPC spawner
-                NPCSpawner.Init(_log, _mainType, _playerType, _vector2Type,
-                    _vector2XField, _vector2YField, _myPlayerField, _playerArrayField, _playerCenterProp);
-
-                _log.Debug("Reflection initialized");
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"Reflection init error: {ex.Message}");
-            }
-        }
-
-        private void ClearReflectionCache()
-        {
-            _mainType = null;
-            _playerType = null;
-            _vector2Type = null;
-            _netModeField = null;
-            _myPlayerField = null;
-            _playerArrayField = null;
-            _dayTimeField = null;
-            _timeField = null;
-            _dayRateField = null;
-            _spawnTileXField = null;
-            _spawnTileYField = null;
-            _dungeonXField = null;
-            _dungeonYField = null;
-            _maxTilesXField = null;
-            _maxTilesYField = null;
-            _worldSurfaceField = null;
-            _statLifeField = null;
-            _statLifeMax2Field = null;
-            _statManaField = null;
-            _statManaMax2Field = null;
-            _spawnXField = null;
-            _spawnYField = null;
-            _immuneField = null;
-            _immuneTimeField = null;
-            _immuneNoBlink = null;
-            _respawnTimerField = null;
-            _teleportMethod = null;
-            _vector2XField = null;
-            _vector2YField = null;
-            _positionField = null;
-            _playerCenterProp = null;
-            _maxRunSpeedField = null;
-            _runAccelerationField = null;
-            _shellphoneSpawnMethod = null;
-            _magicConchMethod = null;
-            _demonConchMethod = null;
-            _teleportationPotionMethod = null;
-            _npcArrayField = null;
-            _npcActiveField = null;
-            _npcBossField = null;
-            _npcTypeField = null;
-            _npcCenterProp = null;
-            _allowedToSpreadInfectionsField = null;
-        }
-
         #endregion
 
         #region Harmony Patches
@@ -439,13 +236,12 @@ namespace AdminPanel
                 _patchesApplied = true;
             }
 
-            // Guard against race with Unload clearing these
-            if (_harmony == null || _playerType == null || _mainType == null) return;
+            if (_harmony == null) return;
 
             try
             {
                 // Player.ResetEffects postfix - god mode immunity each frame
-                var resetEffectsMethod = _playerType.GetMethod("ResetEffects", BindingFlags.Public | BindingFlags.Instance);
+                var resetEffectsMethod = typeof(Player).GetMethod("ResetEffects", BindingFlags.Public | BindingFlags.Instance);
                 if (resetEffectsMethod != null)
                 {
                     var postfix = typeof(Mod).GetMethod(nameof(ResetEffects_Postfix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -454,7 +250,7 @@ namespace AdminPanel
                 }
 
                 // Player.UpdateDead postfix - custom respawn times
-                var updateDeadMethod = _playerType.GetMethod("UpdateDead", BindingFlags.Public | BindingFlags.Instance);
+                var updateDeadMethod = typeof(Player).GetMethod("UpdateDead", BindingFlags.Public | BindingFlags.Instance);
                 if (updateDeadMethod != null)
                 {
                     var postfix = typeof(Mod).GetMethod(nameof(UpdateDead_Postfix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -463,7 +259,7 @@ namespace AdminPanel
                 }
 
                 // Main.UpdateTimeRate postfix - time speed multiplier
-                var updateTimeRateMethod = _mainType.GetMethod("UpdateTimeRate", BindingFlags.Public | BindingFlags.Static);
+                var updateTimeRateMethod = typeof(Main).GetMethod("UpdateTimeRate", BindingFlags.Public | BindingFlags.Static);
                 if (updateTimeRateMethod != null)
                 {
                     var postfix = typeof(Mod).GetMethod(nameof(UpdateTimeRate_Postfix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -472,7 +268,7 @@ namespace AdminPanel
                 }
 
                 // Player.HorizontalMovement prefix - movement speed multiplier
-                var horizontalMovementMethod = _playerType.GetMethod("HorizontalMovement", BindingFlags.Public | BindingFlags.Instance);
+                var horizontalMovementMethod = typeof(Player).GetMethod("HorizontalMovement", BindingFlags.Public | BindingFlags.Instance);
                 if (horizontalMovementMethod != null)
                 {
                     var prefix = typeof(Mod).GetMethod(nameof(HorizontalMovement_Prefix), BindingFlags.NonPublic | BindingFlags.Static);
@@ -481,16 +277,12 @@ namespace AdminPanel
                 }
 
                 // WorldGen.hardUpdateWorld prefix - biome spread disable
-                var worldGenType = _mainType.Assembly.GetType("Terraria.WorldGen");
-                if (worldGenType != null)
+                var hardUpdateMethod = typeof(WorldGen).GetMethod("hardUpdateWorld", BindingFlags.Public | BindingFlags.Static);
+                if (hardUpdateMethod != null)
                 {
-                    var hardUpdateMethod = worldGenType.GetMethod("hardUpdateWorld", BindingFlags.Public | BindingFlags.Static);
-                    if (hardUpdateMethod != null)
-                    {
-                        var prefix = typeof(Mod).GetMethod(nameof(HardUpdateWorld_Prefix), BindingFlags.NonPublic | BindingFlags.Static);
-                        _harmony.Patch(hardUpdateMethod, prefix: new HarmonyMethod(prefix));
-                        _log.Debug("Patched WorldGen.hardUpdateWorld for biome spread control");
-                    }
+                    var prefix = typeof(Mod).GetMethod(nameof(HardUpdateWorld_Prefix), BindingFlags.NonPublic | BindingFlags.Static);
+                    _harmony.Patch(hardUpdateMethod, prefix: new HarmonyMethod(prefix));
+                    _log.Debug("Patched WorldGen.hardUpdateWorld for biome spread control");
                 }
             }
             catch (Exception ex)
@@ -499,42 +291,40 @@ namespace AdminPanel
             }
         }
 
-        private static void ResetEffects_Postfix(object __instance)
+        private static void ResetEffects_Postfix(Player __instance)
         {
             if (!_godModeActive) return;
 
             try
             {
-                var localPlayer = GetLocalPlayer();
-                if (__instance == localPlayer)
+                if (__instance == Main.player[Main.myPlayer])
                 {
-                    _immuneField?.SetValue(__instance, true);
-                    _immuneTimeField?.SetValue(__instance, 2);
-                    _immuneNoBlink?.SetValue(__instance, true);
+                    __instance.immune = true;
+                    __instance.immuneTime = 2;
+                    __instance.immuneNoBlink = true;
                 }
             }
             catch { }
         }
 
-        private static void UpdateDead_Postfix(object __instance)
+        private static void UpdateDead_Postfix(Player __instance)
         {
             try
             {
-                var localPlayer = GetLocalPlayer();
-                if (__instance != localPlayer) return;
+                if (__instance != Main.player[Main.myPlayer]) return;
 
                 _inBossFight = DetectBossFight(__instance);
 
                 float mult = _inBossFight ? _bossRespawnMult : _normalRespawnMult;
                 if (mult >= 1.0f) return;
 
-                int currentTimer = (int)_respawnTimerField.GetValue(__instance);
+                int currentTimer = __instance.respawnTimer;
                 if (currentTimer > 0)
                 {
                     int extraReduction = (int)((1.0f / mult) - 1);
                     if (extraReduction > 0)
                     {
-                        _respawnTimerField.SetValue(__instance, Math.Max(0, currentTimer - extraReduction));
+                        __instance.respawnTimer = Math.Max(0, currentTimer - extraReduction);
                     }
                 }
             }
@@ -552,10 +342,10 @@ namespace AdminPanel
 
             try
             {
-                int current = (int)_dayRateField.GetValue(null);
+                int current = Main.dayRate;
                 if (current > 0) // Don't multiply if frozen (dayRate=0)
                 {
-                    _dayRateField.SetValue(null, current * _timeSpeedMultiplier);
+                    Main.dayRate = current * _timeSpeedMultiplier;
                 }
             }
             catch { }
@@ -565,19 +355,16 @@ namespace AdminPanel
         /// Prefix for Player.HorizontalMovement - multiplies movement speed fields
         /// after all equipment/buff effects have been applied.
         /// </summary>
-        private static void HorizontalMovement_Prefix(object __instance)
+        private static void HorizontalMovement_Prefix(Player __instance)
         {
             if (_moveSpeedMultiplier <= 1) return;
 
             try
             {
-                var localPlayer = GetLocalPlayer();
-                if (__instance != localPlayer) return;
+                if (__instance != Main.player[Main.myPlayer]) return;
 
-                float maxRun = (float)_maxRunSpeedField.GetValue(__instance);
-                float runAccel = (float)_runAccelerationField.GetValue(__instance);
-                _maxRunSpeedField.SetValue(__instance, maxRun * _moveSpeedMultiplier);
-                _runAccelerationField.SetValue(__instance, runAccel * _moveSpeedMultiplier);
+                __instance.maxRunSpeed *= _moveSpeedMultiplier;
+                __instance.runAcceleration *= _moveSpeedMultiplier;
             }
             catch { }
         }
@@ -591,44 +378,23 @@ namespace AdminPanel
             if (!_biomeSpreadDisabled) return true;
 
             // Also suppress the AllowedToSpreadInfections flag for grass-related spread
-            try { _allowedToSpreadInfectionsField?.SetValue(null, false); } catch { }
+            try { WorldGen.AllowedToSpreadInfections = false; } catch { }
             return false; // Skip vanilla hardUpdateWorld entirely
         }
 
-        private static object GetLocalPlayer()
+        private static bool DetectBossFight(Player player)
         {
-            int myPlayer = (int)_myPlayerField.GetValue(null);
-            var players = (Array)_playerArrayField.GetValue(null);
-            return players.GetValue(myPlayer);
-        }
+            Vector2 playerCenter = player.Center;
 
-        private static bool DetectBossFight(object player)
-        {
-            if (_npcArrayField == null || _playerCenterProp == null) return false;
-
-            var playerCenter = _playerCenterProp.GetValue(player);
-            float playerX = (float)_vector2XField.GetValue(playerCenter);
-            float playerY = (float)_vector2YField.GetValue(playerCenter);
-
-            var npcs = (Array)_npcArrayField.GetValue(null);
-            for (int i = 0; i < Math.Min(npcs.Length, 200); i++)
+            for (int i = 0; i < Math.Min(Main.npc.Length, 200); i++)
             {
-                var npc = npcs.GetValue(i);
-                if (npc == null) continue;
+                NPC npc = Main.npc[i];
+                if (npc == null || !npc.active) continue;
 
-                bool active = (bool)_npcActiveField.GetValue(npc);
-                if (!active) continue;
-
-                bool isBoss = (bool)_npcBossField.GetValue(npc);
-                int npcTypeId = (int)_npcTypeField.GetValue(npc);
-
-                if ((isBoss || npcTypeId == 13 || npcTypeId == 14 || npcTypeId == 15) && npcTypeId != 395)
+                if ((npc.boss || npc.type == 13 || npc.type == 14 || npc.type == 15) && npc.type != 395)
                 {
-                    var npcCenter = _npcCenterProp.GetValue(npc);
-                    float npcX = (float)_vector2XField.GetValue(npcCenter);
-                    float npcY = (float)_vector2YField.GetValue(npcCenter);
-
-                    if (Math.Abs(playerX - npcX) + Math.Abs(playerY - npcY) < 4000f)
+                    Vector2 npcCenter = npc.Center;
+                    if (Math.Abs(playerCenter.X - npcCenter.X) + Math.Abs(playerCenter.Y - npcCenter.Y) < 4000f)
                         return true;
                 }
             }
@@ -689,7 +455,7 @@ namespace AdminPanel
 
         private void OnToggleUI()
         {
-            if (_singleplayerOnly && IsMultiplayer())
+            if (_singleplayerOnly && Main.netMode != 0)
             {
                 _log.Warn("AdminPanel is disabled in multiplayer");
                 return;
@@ -700,7 +466,7 @@ namespace AdminPanel
 
         private void OnToggleGodMode()
         {
-            if (_singleplayerOnly && IsMultiplayer())
+            if (_singleplayerOnly && Main.netMode != 0)
             {
                 _log.Warn("God mode is disabled in multiplayer");
                 return;
@@ -711,10 +477,10 @@ namespace AdminPanel
 
             try
             {
-                var player = GetLocalPlayer();
-                _immuneField?.SetValue(player, _godModeActive);
-                _immuneTimeField?.SetValue(player, _godModeActive ? 2 : 0);
-                _immuneNoBlink?.SetValue(player, _godModeActive);
+                Player player = Main.player[Main.myPlayer];
+                player.immune = _godModeActive;
+                player.immuneTime = _godModeActive ? 2 : 0;
+                player.immuneNoBlink = _godModeActive;
             }
             catch (Exception ex)
             {
@@ -722,12 +488,6 @@ namespace AdminPanel
             }
 
             SaveSettingIfChanged("godMode", _godModeActive, ref _prevGodMode);
-        }
-
-        private bool IsMultiplayer()
-        {
-            try { return (int)_netModeField.GetValue(null) != 0; }
-            catch { return false; }
         }
 
         #endregion
@@ -866,7 +626,7 @@ namespace AdminPanel
                 // Restore AllowedToSpreadInfections when re-enabling
                 if (!_biomeSpreadDisabled)
                 {
-                    try { _allowedToSpreadInfectionsField?.SetValue(null, true); } catch { }
+                    try { WorldGen.AllowedToSpreadInfections = true; } catch { }
                 }
                 _log.Info($"Biome spread: {(_biomeSpreadDisabled ? "DISABLED" : "enabled")}");
                 SaveSettingIfChanged("biomeSpreadDisabled", _biomeSpreadDisabled, ref _prevBiomeSpread);
@@ -886,10 +646,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                int max = (int)_statLifeMax2Field.GetValue(player);
-                _statLifeField.SetValue(player, max);
-                _log.Info($"Health restored to {max}");
+                Player player = Main.player[Main.myPlayer];
+                player.statLife = player.statLifeMax2;
+                _log.Info($"Health restored to {player.statLifeMax2}");
             }
             catch (Exception ex) { _log.Error($"Failed to restore health: {ex.Message}"); }
         }
@@ -898,10 +657,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                int max = (int)_statManaMax2Field.GetValue(player);
-                _statManaField.SetValue(player, max);
-                _log.Info($"Mana restored to {max}");
+                Player player = Main.player[Main.myPlayer];
+                player.statMana = player.statManaMax2;
+                _log.Info($"Mana restored to {player.statManaMax2}");
             }
             catch (Exception ex) { _log.Error($"Failed to restore mana: {ex.Message}"); }
         }
@@ -910,8 +668,8 @@ namespace AdminPanel
         {
             try
             {
-                _dayTimeField.SetValue(null, dayTime);
-                _timeField.SetValue(null, time);
+                Main.dayTime = dayTime;
+                Main.time = time;
                 _log.Info($"Time set to {(dayTime ? "day" : "night")} {time}");
             }
             catch (Exception ex) { _log.Error($"Failed to set time: {ex.Message}"); }
@@ -921,7 +679,7 @@ namespace AdminPanel
         {
             try
             {
-                _respawnTimerField?.SetValue(GetLocalPlayer(), 0);
+                Main.player[Main.myPlayer].respawnTimer = 0;
                 _log.Info("Respawn timer set to 0");
             }
             catch (Exception ex) { _log.Error($"Failed to instant respawn: {ex.Message}"); }
@@ -935,19 +693,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                if (_shellphoneSpawnMethod != null)
-                {
-                    _shellphoneSpawnMethod.Invoke(player, null);
-                    _log.Info("Teleported to spawn (shellphone)");
-                }
-                else
-                {
-                    // Fallback: manual coordinate teleport
-                    int tx = (int)_spawnTileXField.GetValue(null);
-                    int ty = (int)_spawnTileYField.GetValue(null);
-                    TeleportPlayer(tx * 16f + 8f - 10f, ty * 16f - 42f);
-                }
+                Player player = Main.player[Main.myPlayer];
+                player.Shellphone_Spawn();
+                _log.Info("Teleported to spawn (shellphone)");
             }
             catch (Exception ex) { _log.Error($"Failed to teleport to spawn: {ex.Message}"); }
         }
@@ -956,10 +704,7 @@ namespace AdminPanel
         {
             try
             {
-                int dx = (int)_dungeonXField.GetValue(null);
-                int dy = (int)_dungeonYField.GetValue(null);
-                // Center player on dungeon tile with proper offset
-                TeleportPlayer(dx * 16f + 8f - 10f, dy * 16f - 42f);
+                TeleportPlayer(Main.dungeonX * 16f + 8f - 10f, Main.dungeonY * 16f - 42f);
             }
             catch (Exception ex) { _log.Error($"Failed to teleport to dungeon: {ex.Message}"); }
         }
@@ -968,21 +713,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                if (_demonConchMethod != null)
-                {
-                    _demonConchMethod.Invoke(player, null);
-                    _log.Info("Teleported to hell (demon conch)");
-                }
-                else
-                {
-                    // Fallback: manual calculation
-                    float px = (_positionField != null && _vector2XField != null)
-                        ? (float)_vector2XField.GetValue(_positionField.GetValue(player))
-                        : (int)_spawnTileXField.GetValue(null) * 16f;
-                    int hellY = (int)_maxTilesYField.GetValue(null) - 200;
-                    TeleportPlayer(px, hellY * 16f);
-                }
+                Player player = Main.player[Main.myPlayer];
+                player.DemonConch();
+                _log.Info("Teleported to hell (demon conch)");
             }
             catch (Exception ex) { _log.Error($"Failed to teleport to hell: {ex.Message}"); }
         }
@@ -991,18 +724,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                if (_magicConchMethod != null)
-                {
-                    _magicConchMethod.Invoke(player, null);
-                    _log.Info("Teleported to beach (magic conch)");
-                }
-                else
-                {
-                    // Fallback: rough beach estimate
-                    double surface = (double)_worldSurfaceField.GetValue(null);
-                    TeleportPlayer(200 * 16f, ((int)surface - 5) * 16f);
-                }
+                Player player = Main.player[Main.myPlayer];
+                player.MagicConch();
+                _log.Info("Teleported to beach (magic conch)");
             }
             catch (Exception ex) { _log.Error($"Failed to teleport to beach: {ex.Message}"); }
         }
@@ -1011,19 +735,16 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                int sx = (int)_spawnXField.GetValue(player);
-                int sy = (int)_spawnYField.GetValue(player);
-
-                if (sx == -1 || sy == -1)
+                Player player = Main.player[Main.myPlayer];
+                if (player.SpawnX == -1 || player.SpawnY == -1)
                 {
                     _log.Info("No bed spawn set, teleporting to world spawn");
                     TeleportToSpawn();
                 }
                 else
                 {
-                    TeleportPlayer(sx * 16f + 8f - 10f, sy * 16f - 42f);
-                    _log.Info($"Teleported to bed ({sx}, {sy})");
+                    TeleportPlayer(player.SpawnX * 16f + 8f - 10f, player.SpawnY * 16f - 42f);
+                    _log.Info($"Teleported to bed ({player.SpawnX}, {player.SpawnY})");
                 }
             }
             catch (Exception ex) { _log.Error($"Failed to teleport to bed: {ex.Message}"); }
@@ -1033,16 +754,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                if (_teleportationPotionMethod != null)
-                {
-                    _teleportationPotionMethod.Invoke(player, null);
-                    _log.Info("Random teleport (teleportation potion)");
-                }
-                else
-                {
-                    _log.Warn("TeleportationPotion method not found");
-                }
+                Player player = Main.player[Main.myPlayer];
+                player.TeleportationPotion();
+                _log.Info("Random teleport (teleportation potion)");
             }
             catch (Exception ex) { _log.Error($"Failed to random teleport: {ex.Message}"); }
         }
@@ -1051,18 +765,9 @@ namespace AdminPanel
         {
             try
             {
-                var player = GetLocalPlayer();
-                if (_teleportMethod != null && _vector2Type != null)
-                {
-                    var pos = Activator.CreateInstance(_vector2Type, new object[] { worldX, worldY });
-                    var parms = _teleportMethod.GetParameters();
-
-                    if (parms.Length == 1) _teleportMethod.Invoke(player, new[] { pos });
-                    else if (parms.Length == 2) _teleportMethod.Invoke(player, new object[] { pos, 1 });
-                    else if (parms.Length >= 3) _teleportMethod.Invoke(player, new object[] { pos, 1, 0 });
-
-                    _log.Info($"Teleported to ({worldX / 16:F0}, {worldY / 16:F0})");
-                }
+                Player player = Main.player[Main.myPlayer];
+                player.Teleport(new Vector2(worldX, worldY), 1, 0);
+                _log.Info($"Teleported to ({worldX / 16:F0}, {worldY / 16:F0})");
             }
             catch (Exception ex) { _log.Error($"Failed to teleport: {ex.Message}"); }
         }

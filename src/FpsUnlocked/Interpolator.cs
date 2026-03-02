@@ -1,5 +1,7 @@
 using System;
 using System.Reflection;
+using Microsoft.Xna.Framework;
+using Terraria;
 
 namespace FpsUnlocked
 {
@@ -41,11 +43,6 @@ namespace FpsUnlocked
 
         // Guard: only restore if apply succeeded this frame
         private static bool _applied;
-
-        // Cached Vector2 constructor for trail interpolation
-        private static ConstructorInfo _vec2Ctor;
-        private static FieldInfo _vec2XField;
-        private static FieldInfo _vec2YField;
 
         private const float PI = 3.14159265f;
         private const float TWO_PI = 6.2831853f;
@@ -99,11 +96,6 @@ namespace FpsUnlocked
             // Dust customData offset
             _savedDustCustom = new float[maxD * 2];
             _dustCustomApplied = new bool[maxD];
-
-            // Cache Vector2 constructor and fields for trail interpolation
-            _vec2Ctor = ReflectionCache.Vector2Type.GetConstructor(new[] { typeof(float), typeof(float) });
-            _vec2XField = ReflectionCache.Vector2Type.GetField("X", BindingFlags.Public | BindingFlags.Instance);
-            _vec2YField = ReflectionCache.Vector2Type.GetField("Y", BindingFlags.Public | BindingFlags.Instance);
         }
 
         /// <summary>
@@ -156,13 +148,13 @@ namespace FpsUnlocked
 
         private static void ApplyPlayers(float t)
         {
-            var players = ReflectionCache.GetEntityArray(ReflectionCache.MainPlayerField);
+            var players = Main.player;
             if (players == null) return;
             int count = Math.Min(players.Length, ReflectionCache.MaxPlayers);
 
             for (int i = 0; i < count; i++)
             {
-                var p = players.GetValue(i);
+                var p = players[i];
                 if (p == null) { _playerDeltaX[i] = 0f; _playerDeltaY[i] = 0f; continue; }
                 if (KeyframeStore.PlayerSkip[i]) { _playerDeltaX[i] = 0f; _playerDeltaY[i] = 0f; continue; }
 
@@ -203,24 +195,19 @@ namespace FpsUnlocked
                 _playerDeltaY[i] = dy;
 
                 // Offset shadowPos (afterimage trail) by interpolation delta
-                if (ReflectionCache.PlayerShadowPosField != null)
+                var shadowArr = p.shadowPos;
+                if (shadowArr != null)
                 {
-                    var shadowArr = ReflectionCache.PlayerShadowPosField.GetValue(p) as Array;
-                    if (shadowArr != null)
+                    int shadowCount = Math.Min(3, shadowArr.Length);
+                    for (int j = 0; j < shadowCount; j++)
                     {
-                        int shadowCount = Math.Min(3, shadowArr.Length);
-                        for (int j = 0; j < shadowCount; j++)
-                        {
-                            var vec = shadowArr.GetValue(j);
-                            int sIdx = i * 6 + j * 2;
-                            float sx = (float)_vec2XField.GetValue(vec);
-                            float sy = (float)_vec2YField.GetValue(vec);
-                            _savedPlayerShadowPos[sIdx + 0] = sx;
-                            _savedPlayerShadowPos[sIdx + 1] = sy;
-                            _vec2XField.SetValue(vec, sx + dx);
-                            _vec2YField.SetValue(vec, sy + dy);
-                            shadowArr.SetValue(vec, j);
-                        }
+                        int sIdx = i * 6 + j * 2;
+                        float sx = shadowArr[j].X;
+                        float sy = shadowArr[j].Y;
+                        _savedPlayerShadowPos[sIdx + 0] = sx;
+                        _savedPlayerShadowPos[sIdx + 1] = sy;
+                        shadowArr[j].X = sx + dx;
+                        shadowArr[j].Y = sy + dy;
                     }
                 }
 
@@ -234,13 +221,13 @@ namespace FpsUnlocked
 
         private static void RestorePlayers()
         {
-            var players = ReflectionCache.GetEntityArray(ReflectionCache.MainPlayerField);
+            var players = Main.player;
             if (players == null) return;
             int count = Math.Min(players.Length, ReflectionCache.MaxPlayers);
 
             for (int i = 0; i < count; i++)
             {
-                var p = players.GetValue(i);
+                var p = players[i];
                 if (p == null) continue;
                 if (KeyframeStore.PlayerSkip[i]) continue;
 
@@ -256,20 +243,15 @@ namespace FpsUnlocked
                 ReflectionCache.SetPlayerItemRot(p, _savedPlayer[offset + 8]);
 
                 // Restore shadowPos
-                if (ReflectionCache.PlayerShadowPosField != null)
+                var shadowArr = p.shadowPos;
+                if (shadowArr != null)
                 {
-                    var shadowArr = ReflectionCache.PlayerShadowPosField.GetValue(p) as Array;
-                    if (shadowArr != null)
+                    int shadowCount = Math.Min(3, shadowArr.Length);
+                    for (int j = 0; j < shadowCount; j++)
                     {
-                        int shadowCount = Math.Min(3, shadowArr.Length);
-                        for (int j = 0; j < shadowCount; j++)
-                        {
-                            var vec = shadowArr.GetValue(j);
-                            int sIdx = i * 6 + j * 2;
-                            _vec2XField.SetValue(vec, _savedPlayerShadowPos[sIdx + 0]);
-                            _vec2YField.SetValue(vec, _savedPlayerShadowPos[sIdx + 1]);
-                            shadowArr.SetValue(vec, j);
-                        }
+                        int sIdx = i * 6 + j * 2;
+                        shadowArr[j].X = _savedPlayerShadowPos[sIdx + 0];
+                        shadowArr[j].Y = _savedPlayerShadowPos[sIdx + 1];
                     }
                 }
 
@@ -285,7 +267,7 @@ namespace FpsUnlocked
 
         private static void ApplyNpcs(float t)
         {
-            var npcs = ReflectionCache.GetEntityArray(ReflectionCache.MainNpcField);
+            var npcs = Main.npc;
             if (npcs == null) return;
             int count = Math.Min(npcs.Length, ReflectionCache.MaxNpcs);
 
@@ -296,7 +278,7 @@ namespace FpsUnlocked
                     _npcDeltaX[i] = 0f; _npcDeltaY[i] = 0f; continue;
                 }
 
-                var npc = npcs.GetValue(i);
+                var npc = npcs[i];
                 if (npc == null) { _npcDeltaX[i] = 0f; _npcDeltaY[i] = 0f; continue; }
 
                 int offset = i * KeyframeStore.NpcStride;
@@ -346,7 +328,7 @@ namespace FpsUnlocked
 
         private static void RestoreNpcs()
         {
-            var npcs = ReflectionCache.GetEntityArray(ReflectionCache.MainNpcField);
+            var npcs = Main.npc;
             if (npcs == null) return;
             int count = Math.Min(npcs.Length, ReflectionCache.MaxNpcs);
 
@@ -356,7 +338,7 @@ namespace FpsUnlocked
                 if (KeyframeStore.NpcSkip[i]) continue;
                 if (!KeyframeStore.NpcActiveBegin[i]) continue;
 
-                var npc = npcs.GetValue(i);
+                var npc = npcs[i];
                 if (npc == null) continue;
 
                 int offset = i * KeyframeStore.NpcStride;
@@ -377,7 +359,7 @@ namespace FpsUnlocked
 
         private static void ApplyProjectiles(float t)
         {
-            var projs = ReflectionCache.GetEntityArray(ReflectionCache.MainProjectileField);
+            var projs = Main.projectile;
             if (projs == null) return;
             int count = Math.Min(projs.Length, ReflectionCache.MaxProjectiles);
 
@@ -388,7 +370,7 @@ namespace FpsUnlocked
                     _projDeltaX[i] = 0f; _projDeltaY[i] = 0f; continue;
                 }
 
-                var proj = projs.GetValue(i);
+                var proj = projs[i];
                 if (proj == null) { _projDeltaX[i] = 0f; _projDeltaY[i] = 0f; continue; }
 
                 int offset = i * KeyframeStore.ProjStride;
@@ -437,13 +419,10 @@ namespace FpsUnlocked
             }
         }
 
-        private static void ApplyProjectileTrail(object proj, int index, float t)
+        private static void ApplyProjectileTrail(Projectile proj, int index, float t)
         {
-            if (ReflectionCache.ProjOldPosField == null || ReflectionCache.ProjOldRotField == null)
-                return;
-
-            var oldPosArr = ReflectionCache.ProjOldPosField.GetValue(proj) as Array;
-            var oldRotArr = ReflectionCache.ProjOldRotField.GetValue(proj) as float[];
+            var oldPosArr = proj.oldPos;
+            var oldRotArr = proj.oldRot;
             if (oldPosArr == null || oldRotArr == null) return;
 
             int baseOffset = index * KeyframeStore.ProjTrailStride;
@@ -452,10 +431,9 @@ namespace FpsUnlocked
             // Save current trail
             for (int t2 = 0; t2 < trailCount; t2++)
             {
-                var vec2 = oldPosArr.GetValue(t2);
                 int tOff = baseOffset + t2 * 3;
-                _savedProjTrail[tOff + 0] = (float)_vec2XField.GetValue(vec2);
-                _savedProjTrail[tOff + 1] = (float)_vec2YField.GetValue(vec2);
+                _savedProjTrail[tOff + 0] = oldPosArr[t2].X;
+                _savedProjTrail[tOff + 1] = oldPosArr[t2].Y;
                 _savedProjTrail[tOff + 2] = oldRotArr[t2];
             }
 
@@ -467,15 +445,14 @@ namespace FpsUnlocked
                 float iy = Lerp(KeyframeStore.ProjTrailBegin[tOff + 1], KeyframeStore.ProjTrailEnd[tOff + 1], t);
                 float ir = AngleLerp(KeyframeStore.ProjTrailBegin[tOff + 2], KeyframeStore.ProjTrailEnd[tOff + 2], t);
 
-                var newVec2 = _vec2Ctor.Invoke(new object[] { ix, iy });
-                oldPosArr.SetValue(newVec2, t2);
+                oldPosArr[t2] = new Vector2(ix, iy);
                 oldRotArr[t2] = ir;
             }
         }
 
         private static void RestoreProjectiles()
         {
-            var projs = ReflectionCache.GetEntityArray(ReflectionCache.MainProjectileField);
+            var projs = Main.projectile;
             if (projs == null) return;
             int count = Math.Min(projs.Length, ReflectionCache.MaxProjectiles);
 
@@ -485,7 +462,7 @@ namespace FpsUnlocked
                 if (KeyframeStore.ProjSkip[i]) continue;
                 if (!KeyframeStore.ProjActiveBegin[i]) continue;
 
-                var proj = projs.GetValue(i);
+                var proj = projs[i];
                 if (proj == null) continue;
 
                 int offset = i * KeyframeStore.ProjStride;
@@ -502,13 +479,10 @@ namespace FpsUnlocked
             }
         }
 
-        private static void RestoreProjectileTrail(object proj, int index)
+        private static void RestoreProjectileTrail(Projectile proj, int index)
         {
-            if (ReflectionCache.ProjOldPosField == null || ReflectionCache.ProjOldRotField == null)
-                return;
-
-            var oldPosArr = ReflectionCache.ProjOldPosField.GetValue(proj) as Array;
-            var oldRotArr = ReflectionCache.ProjOldRotField.GetValue(proj) as float[];
+            var oldPosArr = proj.oldPos;
+            var oldRotArr = proj.oldRot;
             if (oldPosArr == null || oldRotArr == null) return;
 
             int baseOffset = index * KeyframeStore.ProjTrailStride;
@@ -517,8 +491,7 @@ namespace FpsUnlocked
             for (int t = 0; t < trailCount; t++)
             {
                 int tOff = baseOffset + t * 3;
-                var newVec2 = _vec2Ctor.Invoke(new object[] { _savedProjTrail[tOff + 0], _savedProjTrail[tOff + 1] });
-                oldPosArr.SetValue(newVec2, t);
+                oldPosArr[t] = new Vector2(_savedProjTrail[tOff + 0], _savedProjTrail[tOff + 1]);
                 oldRotArr[t] = _savedProjTrail[tOff + 2];
             }
         }
@@ -529,7 +502,7 @@ namespace FpsUnlocked
 
         private static void ApplyDust(float t)
         {
-            var dust = ReflectionCache.GetEntityArray(ReflectionCache.MainDustField);
+            var dust = Main.dust;
             if (dust == null) return;
             int count = Math.Min(dust.Length, ReflectionCache.MaxDust);
 
@@ -538,7 +511,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.DustActiveEnd[i]) continue;
                 if (!KeyframeStore.DustActiveBegin[i]) continue;
 
-                var d = dust.GetValue(i);
+                var d = dust[i];
                 if (d == null) continue;
 
                 int offset = i * KeyframeStore.DustStride;
@@ -555,7 +528,7 @@ namespace FpsUnlocked
 
         private static void RestoreDust()
         {
-            var dust = ReflectionCache.GetEntityArray(ReflectionCache.MainDustField);
+            var dust = Main.dust;
             if (dust == null) return;
             int count = Math.Min(dust.Length, ReflectionCache.MaxDust);
 
@@ -564,7 +537,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.DustActiveEnd[i]) continue;
                 if (!KeyframeStore.DustActiveBegin[i]) continue;
 
-                var d = dust.GetValue(i);
+                var d = dust[i];
                 if (d == null) continue;
 
                 int offset = i * KeyframeStore.DustStride;
@@ -580,7 +553,7 @@ namespace FpsUnlocked
 
         private static void ApplyGore(float t)
         {
-            var gore = ReflectionCache.GetEntityArray(ReflectionCache.MainGoreField);
+            var gore = Main.gore;
             if (gore == null) return;
             int count = Math.Min(gore.Length, ReflectionCache.MaxGore);
 
@@ -589,7 +562,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.GoreActiveEnd[i]) continue;
                 if (!KeyframeStore.GoreActiveBegin[i]) continue;
 
-                var g = gore.GetValue(i);
+                var g = gore[i];
                 if (g == null) continue;
 
                 int offset = i * KeyframeStore.GoreStride;
@@ -606,7 +579,7 @@ namespace FpsUnlocked
 
         private static void RestoreGore()
         {
-            var gore = ReflectionCache.GetEntityArray(ReflectionCache.MainGoreField);
+            var gore = Main.gore;
             if (gore == null) return;
             int count = Math.Min(gore.Length, ReflectionCache.MaxGore);
 
@@ -615,7 +588,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.GoreActiveEnd[i]) continue;
                 if (!KeyframeStore.GoreActiveBegin[i]) continue;
 
-                var g = gore.GetValue(i);
+                var g = gore[i];
                 if (g == null) continue;
 
                 int offset = i * KeyframeStore.GoreStride;
@@ -631,7 +604,7 @@ namespace FpsUnlocked
 
         private static void ApplyItems(float t)
         {
-            var items = ReflectionCache.GetEntityArray(ReflectionCache.MainItemField);
+            var items = Main.item;
             if (items == null) return;
             int count = Math.Min(items.Length, ReflectionCache.MaxItems);
 
@@ -642,7 +615,7 @@ namespace FpsUnlocked
                     _itemDeltaX[i] = 0f; _itemDeltaY[i] = 0f; continue;
                 }
 
-                var item = items.GetValue(i);
+                var item = items[i];
                 if (item == null) { _itemDeltaX[i] = 0f; _itemDeltaY[i] = 0f; continue; }
 
                 int offset = i * KeyframeStore.ItemStride;
@@ -677,7 +650,7 @@ namespace FpsUnlocked
 
         private static void RestoreItems()
         {
-            var items = ReflectionCache.GetEntityArray(ReflectionCache.MainItemField);
+            var items = Main.item;
             if (items == null) return;
             int count = Math.Min(items.Length, ReflectionCache.MaxItems);
 
@@ -686,7 +659,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.ItemActiveEnd[i]) continue;
                 if (!KeyframeStore.ItemActiveBegin[i]) continue;
 
-                var item = items.GetValue(i);
+                var item = items[i];
                 if (item == null) continue;
 
                 int offset = i * KeyframeStore.ItemStride;
@@ -705,7 +678,7 @@ namespace FpsUnlocked
 
         private static void ApplyCombatText(float t)
         {
-            var texts = ReflectionCache.GetEntityArray(ReflectionCache.MainCombatTextField);
+            var texts = Main.combatText;
             if (texts == null) return;
             int count = Math.Min(texts.Length, ReflectionCache.MaxCombatText);
 
@@ -714,7 +687,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.CombatTextActiveEnd[i]) continue;
                 if (!KeyframeStore.CombatTextActiveBegin[i]) continue;
 
-                var ct = texts.GetValue(i);
+                var ct = texts[i];
                 if (ct == null) continue;
 
                 int offset = i * KeyframeStore.CombatTextStride;
@@ -731,7 +704,7 @@ namespace FpsUnlocked
 
         private static void RestoreCombatText()
         {
-            var texts = ReflectionCache.GetEntityArray(ReflectionCache.MainCombatTextField);
+            var texts = Main.combatText;
             if (texts == null) return;
             int count = Math.Min(texts.Length, ReflectionCache.MaxCombatText);
 
@@ -740,7 +713,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.CombatTextActiveEnd[i]) continue;
                 if (!KeyframeStore.CombatTextActiveBegin[i]) continue;
 
-                var ct = texts.GetValue(i);
+                var ct = texts[i];
                 if (ct == null) continue;
 
                 int offset = i * KeyframeStore.CombatTextStride;
@@ -756,7 +729,7 @@ namespace FpsUnlocked
 
         private static void ApplyPopupText(float t)
         {
-            var texts = ReflectionCache.GetEntityArray(ReflectionCache.MainPopupTextField);
+            var texts = PopupText.popupText;
             if (texts == null) return;
             int count = Math.Min(texts.Length, ReflectionCache.MaxPopupText);
 
@@ -765,7 +738,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.PopupTextActiveEnd[i]) continue;
                 if (!KeyframeStore.PopupTextActiveBegin[i]) continue;
 
-                var pt = texts.GetValue(i);
+                var pt = texts[i];
                 if (pt == null) continue;
 
                 int offset = i * KeyframeStore.PopupTextStride;
@@ -782,7 +755,7 @@ namespace FpsUnlocked
 
         private static void RestorePopupText()
         {
-            var texts = ReflectionCache.GetEntityArray(ReflectionCache.MainPopupTextField);
+            var texts = PopupText.popupText;
             if (texts == null) return;
             int count = Math.Min(texts.Length, ReflectionCache.MaxPopupText);
 
@@ -791,7 +764,7 @@ namespace FpsUnlocked
                 if (!KeyframeStore.PopupTextActiveEnd[i]) continue;
                 if (!KeyframeStore.PopupTextActiveBegin[i]) continue;
 
-                var pt = texts.GetValue(i);
+                var pt = texts[i];
                 if (pt == null) continue;
 
                 int offset = i * KeyframeStore.PopupTextStride;
@@ -815,7 +788,7 @@ namespace FpsUnlocked
             if (ReflectionCache.DustCustomData == null || ReflectionCache.EntityWhoAmI == null)
                 return;
 
-            var dust = ReflectionCache.GetEntityArray(ReflectionCache.MainDustField);
+            var dust = Main.dust;
             if (dust == null) return;
             int count = Math.Min(dust.Length, ReflectionCache.MaxDust);
 
@@ -823,7 +796,7 @@ namespace FpsUnlocked
             {
                 _dustCustomApplied[i] = false;
 
-                var d = dust.GetValue(i);
+                var d = dust[i];
                 if (d == null) continue;
                 if (!ReflectionCache.DustActive(d)) continue;
 
@@ -833,7 +806,7 @@ namespace FpsUnlocked
                 float deltaX = 0f, deltaY = 0f;
                 bool matched = false;
 
-                if (ReflectionCache.PlayerType.IsInstanceOfType(cd))
+                if (cd is Player)
                 {
                     int idx = ReflectionCache.EntityWhoAmI(cd);
                     if (idx >= 0 && idx < _playerDeltaX.Length)
@@ -843,7 +816,7 @@ namespace FpsUnlocked
                         matched = true;
                     }
                 }
-                else if (ReflectionCache.NPCType.IsInstanceOfType(cd))
+                else if (cd is NPC)
                 {
                     int idx = ReflectionCache.EntityWhoAmI(cd);
                     if (idx >= 0 && idx < _npcDeltaX.Length)
@@ -853,7 +826,7 @@ namespace FpsUnlocked
                         matched = true;
                     }
                 }
-                else if (ReflectionCache.ProjectileType.IsInstanceOfType(cd))
+                else if (cd is Projectile)
                 {
                     int idx = ReflectionCache.EntityWhoAmI(cd);
                     if (idx >= 0 && idx < _projDeltaX.Length)
@@ -883,7 +856,7 @@ namespace FpsUnlocked
         /// </summary>
         private static void RestoreDustEntityOffset()
         {
-            var dust = ReflectionCache.GetEntityArray(ReflectionCache.MainDustField);
+            var dust = Main.dust;
             if (dust == null) return;
             int count = Math.Min(dust.Length, ReflectionCache.MaxDust);
 
@@ -891,7 +864,7 @@ namespace FpsUnlocked
             {
                 if (!_dustCustomApplied[i]) continue;
 
-                var d = dust.GetValue(i);
+                var d = dust[i];
                 if (d == null) continue;
 
                 ReflectionCache.SetDustPosX(d, _savedDustCustom[i * 2 + 0]);

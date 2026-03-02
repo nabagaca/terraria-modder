@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using Terraria;
+using Terraria.GameContent.Items;
+using Terraria.ID;
 using TerrariaModder.Core.Logging;
 
 namespace WhipStacking
@@ -10,34 +13,10 @@ namespace WhipStacking
         private static ILogger _log;
         internal static bool Enabled = true;
 
-        // TagEffectState fields
+        // TagEffectState private fields (must stay reflection)
         private static FieldInfo _ownerField;
         private static FieldInfo _effectField;
         private static MethodInfo _typeSetter;
-
-        // UniqueTagEffect fields/methods
-        private static FieldInfo _tagDurationField;
-        private static MethodInfo _canApplyTagToNPC;
-        private static MethodInfo _onSetToPlayer;
-        private static MethodInfo _onTagAppliedToNPC;
-        private static MethodInfo _canRunHitEffects;
-        private static MethodInfo _modifyTaggedHit;
-        private static MethodInfo _modifyProcHit;
-        private static MethodInfo _onTaggedHit;
-        private static MethodInfo _onProcHit;
-
-        // ItemID.Sets.UniqueTagEffects array
-        private static Array _uniqueTagEffects;
-
-        // NPC fields
-        private static FieldInfo _npcWhoAmI;
-        private static FieldInfo _npcType;
-
-        // Player fields
-        private static FieldInfo _playerWhoAmI;
-
-        // Main.maxNPCs
-        private static int _maxNPCs;
 
         // Reusable list for Update cleanup (avoids allocation per frame)
         private static readonly List<int> _toRemove = new List<int>();
@@ -47,52 +26,19 @@ namespace WhipStacking
             _log = log;
             try
             {
-                var asm = Assembly.Load("Terraria");
-                var tagType = asm.GetType("Terraria.GameContent.Items.TagEffectState");
-                var effectType = asm.GetType("Terraria.GameContent.Items.UniqueTagEffect");
-                var mainType = asm.GetType("Terraria.Main");
-                var playerType = asm.GetType("Terraria.Player");
-                var npcType = asm.GetType("Terraria.NPC");
-                var setsType = asm.GetType("Terraria.ID.ItemID+Sets");
+                var tagType = typeof(TagEffectState);
 
-                // TagEffectState
+                // Private fields on TagEffectState — must use reflection
                 _ownerField = tagType.GetField("_owner", BindingFlags.NonPublic | BindingFlags.Instance);
                 _effectField = tagType.GetField("_effect", BindingFlags.NonPublic | BindingFlags.Instance);
                 _typeSetter = tagType.GetProperty("Type").GetSetMethod(true);
-
-                // UniqueTagEffect
-                _tagDurationField = effectType.GetField("TagDuration");
-                _canApplyTagToNPC = effectType.GetMethod("CanApplyTagToNPC");
-                _onSetToPlayer = effectType.GetMethod("OnSetToPlayer");
-                _onTagAppliedToNPC = effectType.GetMethod("OnTagAppliedToNPC");
-                _canRunHitEffects = effectType.GetMethod("CanRunHitEffects");
-                _modifyTaggedHit = effectType.GetMethod("ModifyTaggedHit");
-                _modifyProcHit = effectType.GetMethod("ModifyProcHit");
-                _onTaggedHit = effectType.GetMethod("OnTaggedHit");
-                _onProcHit = effectType.GetMethod("OnProcHit");
-
-                // ItemID.Sets.UniqueTagEffects
-                _uniqueTagEffects = (Array)setsType.GetField("UniqueTagEffects",
-                    BindingFlags.Public | BindingFlags.Static).GetValue(null);
-
-                // NPC
-                _npcWhoAmI = npcType.GetField("whoAmI", BindingFlags.Public | BindingFlags.Instance);
-                _npcType = npcType.GetField("type", BindingFlags.Public | BindingFlags.Instance);
-
-                // Player
-                _playerWhoAmI = playerType.GetField("whoAmI", BindingFlags.Public | BindingFlags.Instance);
-
-                // Main.maxNPCs
-                _maxNPCs = (int)mainType.GetField("maxNPCs", BindingFlags.Public | BindingFlags.Static).GetValue(null);
 
                 // Verify critical fields
                 if (_ownerField == null) { log.Error("_owner not found"); return false; }
                 if (_effectField == null) { log.Error("_effect not found"); return false; }
                 if (_typeSetter == null) { log.Error("Type setter not found"); return false; }
-                if (_tagDurationField == null) { log.Error("TagDuration not found"); return false; }
-                if (_uniqueTagEffects == null) { log.Error("UniqueTagEffects not found"); return false; }
 
-                log.Info($"Reflection initialized, maxNPCs={_maxNPCs}");
+                log.Info($"Reflection initialized, maxNPCs={Main.maxNPCs}");
                 return true;
             }
             catch (Exception ex)
@@ -104,23 +50,27 @@ namespace WhipStacking
 
         // --- Helpers ---
 
-        private static int GetPlayerIndex(object tagState)
+        private static Player GetOwner(TagEffectState tagState)
         {
-            var owner = _ownerField.GetValue(tagState);
-            return (int)_playerWhoAmI.GetValue(owner);
+            return (Player)_ownerField.GetValue(tagState);
         }
 
-        private static int GetNpcIndex(object npc) => (int)_npcWhoAmI.GetValue(npc);
-        private static int GetNpcTypeId(object npc) => (int)_npcType.GetValue(npc);
-        private static object GetEffect(int itemType) => _uniqueTagEffects.GetValue(itemType);
-        private static int GetTagDuration(object effect) => (int)_tagDurationField.GetValue(effect);
+        private static int GetPlayerIndex(TagEffectState tagState)
+        {
+            return GetOwner(tagState).whoAmI;
+        }
 
-        private static WhipTagEntry GetOrCreateEntry(int playerIdx, int whipType, object effect)
+        private static UniqueTagEffect GetEffect(int itemType)
+        {
+            return ItemID.Sets.UniqueTagEffects[itemType];
+        }
+
+        private static WhipTagEntry GetOrCreateEntry(int playerIdx, int whipType, UniqueTagEffect effect)
         {
             var dict = MultiTagState.GetOrCreate(playerIdx);
             if (!dict.TryGetValue(whipType, out var entry))
             {
-                entry = new WhipTagEntry(whipType, effect, _maxNPCs);
+                entry = new WhipTagEntry(whipType, effect, Main.maxNPCs);
                 dict[whipType] = entry;
             }
             return entry;
@@ -130,7 +80,7 @@ namespace WhipStacking
         /// Shared logic for setting active effect. Updates vanilla fields for compatibility,
         /// adds new whip to our dict without clearing existing whips.
         /// </summary>
-        private static void SetActiveEffect(object tagState, int type)
+        private static void SetActiveEffect(TagEffectState tagState, int type)
         {
             var effect = GetEffect(type);
 
@@ -143,9 +93,9 @@ namespace WhipStacking
             var dict = MultiTagState.GetOrCreate(playerIdx);
             if (!dict.ContainsKey(type))
             {
-                dict[type] = new WhipTagEntry(type, effect, _maxNPCs);
+                dict[type] = new WhipTagEntry(type, effect, Main.maxNPCs);
                 if (effect != null)
-                    _onSetToPlayer.Invoke(effect, new object[] { _ownerField.GetValue(tagState) });
+                    effect.OnSetToPlayer(GetOwner(tagState));
             }
         }
 
@@ -155,7 +105,7 @@ namespace WhipStacking
         /// TrySetActiveEffect(int type) — Don't clear old tags or remove old player buff.
         /// Add new whip to multi-tag dict, update vanilla fields for compat.
         /// </summary>
-        public static bool TrySetActiveEffect_Prefix(object __instance, int type)
+        public static bool TrySetActiveEffect_Prefix(TagEffectState __instance, int type)
         {
             if (!Enabled) return true;
             try
@@ -173,7 +123,7 @@ namespace WhipStacking
         /// <summary>
         /// TryApplyTagToNPC(int itemType, NPC npc) — Tag NPC in the specific whip's entry.
         /// </summary>
-        public static bool TryApplyTagToNPC_Prefix(object __instance, int itemType, object npc)
+        public static bool TryApplyTagToNPC_Prefix(TagEffectState __instance, int itemType, NPC npc)
         {
             if (!Enabled) return true;
             try
@@ -181,16 +131,15 @@ namespace WhipStacking
                 var effect = GetEffect(itemType);
                 if (effect == null) return true;
 
-                bool canApply = (bool)_canApplyTagToNPC.Invoke(effect, new object[] { GetNpcTypeId(npc) });
-                if (!canApply) return false;
+                if (!effect.CanApplyTagToNPC(npc.type)) return false;
 
                 SetActiveEffect(__instance, itemType);
 
                 int playerIdx = GetPlayerIndex(__instance);
                 var entry = GetOrCreateEntry(playerIdx, itemType, effect);
-                entry.TimeLeftOnNPC[GetNpcIndex(npc)] = GetTagDuration(effect);
+                entry.TimeLeftOnNPC[npc.whoAmI] = effect.TagDuration;
 
-                _onTagAppliedToNPC.Invoke(effect, new object[] { _ownerField.GetValue(__instance), npc });
+                effect.OnTagAppliedToNPC(GetOwner(__instance), npc);
             }
             catch (Exception ex)
             {
@@ -203,7 +152,7 @@ namespace WhipStacking
         /// <summary>
         /// ModifyHit — Apply tag damage from ALL active whips on this NPC.
         /// </summary>
-        public static bool ModifyHit_Prefix(object __instance, object optionalProjectile, object npcHit,
+        public static bool ModifyHit_Prefix(TagEffectState __instance, Projectile optionalProjectile, NPC npcHit,
             ref int damageDealt, ref bool crit)
         {
             if (!Enabled) return true;
@@ -213,29 +162,20 @@ namespace WhipStacking
                 var dict = MultiTagState.GetOrCreate(playerIdx);
                 if (dict.Count == 0) return false;
 
-                int npcIdx = GetNpcIndex(npcHit);
-                var owner = _ownerField.GetValue(__instance);
+                int npcIdx = npcHit.whoAmI;
+                var owner = GetOwner(__instance);
 
                 foreach (var entry in dict.Values)
                 {
                     if (entry.TimeLeftOnNPC[npcIdx] <= 0 || entry.Effect == null) continue;
 
-                    bool canRun = (bool)_canRunHitEffects.Invoke(entry.Effect,
-                        new object[] { owner, optionalProjectile, npcHit });
-                    if (!canRun) continue;
+                    if (!entry.Effect.CanRunHitEffects(owner, optionalProjectile, npcHit)) continue;
 
-                    // ModifyTaggedHit (ref params via reflection args array)
-                    var tagArgs = new object[] { owner, optionalProjectile, npcHit, damageDealt, crit };
-                    _modifyTaggedHit.Invoke(entry.Effect, tagArgs);
-                    damageDealt = (int)tagArgs[3];
-                    crit = (bool)tagArgs[4];
+                    entry.Effect.ModifyTaggedHit(owner, optionalProjectile, npcHit, ref damageDealt, ref crit);
 
                     if (entry.ProcTimeLeftOnNPC[npcIdx] > 0)
                     {
-                        var procArgs = new object[] { owner, optionalProjectile, npcHit, damageDealt, crit };
-                        _modifyProcHit.Invoke(entry.Effect, procArgs);
-                        damageDealt = (int)procArgs[3];
-                        crit = (bool)procArgs[4];
+                        entry.Effect.ModifyProcHit(owner, optionalProjectile, npcHit, ref damageDealt, ref crit);
                     }
                 }
             }
@@ -250,7 +190,7 @@ namespace WhipStacking
         /// <summary>
         /// OnHit — Fire hit effects from ALL active whips on this NPC.
         /// </summary>
-        public static bool OnHit_Prefix(object __instance, object optionalProjectile, object npcHit, int calcDamage)
+        public static bool OnHit_Prefix(TagEffectState __instance, Projectile optionalProjectile, NPC npcHit, int calcDamage)
         {
             if (!Enabled) return true;
             try
@@ -259,25 +199,21 @@ namespace WhipStacking
                 var dict = MultiTagState.GetOrCreate(playerIdx);
                 if (dict.Count == 0) return false;
 
-                int npcIdx = GetNpcIndex(npcHit);
-                var owner = _ownerField.GetValue(__instance);
+                int npcIdx = npcHit.whoAmI;
+                var owner = GetOwner(__instance);
 
                 foreach (var entry in dict.Values)
                 {
                     if (entry.TimeLeftOnNPC[npcIdx] <= 0 || entry.Effect == null) continue;
 
-                    bool canRun = (bool)_canRunHitEffects.Invoke(entry.Effect,
-                        new object[] { owner, optionalProjectile, npcHit });
-                    if (!canRun) continue;
+                    if (!entry.Effect.CanRunHitEffects(owner, optionalProjectile, npcHit)) continue;
 
-                    _onTaggedHit.Invoke(entry.Effect,
-                        new object[] { owner, optionalProjectile, npcHit, calcDamage });
+                    entry.Effect.OnTaggedHit(owner, optionalProjectile, npcHit, calcDamage);
 
                     if (entry.ProcTimeLeftOnNPC[npcIdx] > 0)
                     {
                         entry.ProcTimeLeftOnNPC[npcIdx] = 0; // clear proc before firing (matches vanilla)
-                        _onProcHit.Invoke(entry.Effect,
-                            new object[] { owner, optionalProjectile, npcHit, calcDamage });
+                        entry.Effect.OnProcHit(owner, optionalProjectile, npcHit, calcDamage);
                     }
                 }
             }
@@ -292,7 +228,7 @@ namespace WhipStacking
         /// <summary>
         /// Update — Tick down ALL whip timers, remove expired entries.
         /// </summary>
-        public static bool Update_Prefix(object __instance)
+        public static bool Update_Prefix(TagEffectState __instance)
         {
             if (!Enabled) return true;
             try
@@ -332,7 +268,7 @@ namespace WhipStacking
         /// <summary>
         /// IsNPCTagged — True if ANY whip has active tag on this NPC.
         /// </summary>
-        public static bool IsNPCTagged_Prefix(object __instance, int npcIndex, ref bool __result)
+        public static bool IsNPCTagged_Prefix(TagEffectState __instance, int npcIndex, ref bool __result)
         {
             if (!Enabled) return true;
             try
@@ -361,7 +297,7 @@ namespace WhipStacking
         /// <summary>
         /// CanProcOnNPC — True if ANY whip has active proc on this NPC.
         /// </summary>
-        public static bool CanProcOnNPC_Prefix(object __instance, int npcIndex, ref bool __result)
+        public static bool CanProcOnNPC_Prefix(TagEffectState __instance, int npcIndex, ref bool __result)
         {
             if (!Enabled) return true;
             try
@@ -390,7 +326,7 @@ namespace WhipStacking
         /// <summary>
         /// TryEnableProcOnNPC — Enable proc on the matching whip's entry.
         /// </summary>
-        public static bool TryEnableProcOnNPC_Prefix(object __instance, int expectedActiveEffectType, object npc)
+        public static bool TryEnableProcOnNPC_Prefix(TagEffectState __instance, int expectedActiveEffectType, NPC npc)
         {
             if (!Enabled) return true;
             try
@@ -400,8 +336,7 @@ namespace WhipStacking
 
                 if (dict.TryGetValue(expectedActiveEffectType, out var entry) && entry.Effect != null)
                 {
-                    int npcIdx = GetNpcIndex(npc);
-                    entry.ProcTimeLeftOnNPC[npcIdx] = GetTagDuration(entry.Effect);
+                    entry.ProcTimeLeftOnNPC[npc.whoAmI] = entry.Effect.TagDuration;
                 }
             }
             catch (Exception ex)
@@ -415,7 +350,7 @@ namespace WhipStacking
         /// <summary>
         /// ClearProcOnNPC — Clear proc for all whips on this NPC.
         /// </summary>
-        public static bool ClearProcOnNPC_Prefix(object __instance, int npcIndex)
+        public static bool ClearProcOnNPC_Prefix(TagEffectState __instance, int npcIndex)
         {
             if (!Enabled) return true;
             try
@@ -437,7 +372,7 @@ namespace WhipStacking
         /// <summary>
         /// ResetNPCSlotData — Clear all whip data for this NPC index.
         /// </summary>
-        public static bool ResetNPCSlotData_Prefix(object __instance, int npcIndex)
+        public static bool ResetNPCSlotData_Prefix(TagEffectState __instance, int npcIndex)
         {
             if (!Enabled) return true;
             try
