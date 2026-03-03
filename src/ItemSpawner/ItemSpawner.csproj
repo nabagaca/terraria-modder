@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>TerrariaModder.TileRuntime</AssemblyName>
-    <RootNamespace>TerrariaModder.TileRuntime</RootNamespace>
+    <AssemblyName>ItemSpawner</AssemblyName>
+    <RootNamespace>ItemSpawner</RootNamespace>
     <OutputType>Library</OutputType>
     <LangVersion>latest</LangVersion>
     <OutputPath>..\..\build\plugins\</OutputPath>
@@ -11,6 +11,9 @@
     <TerrariaInstallDir Condition="'$(TerrariaInstallDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Terraria</TerrariaInstallDir>
     <TerrariaAssemblyPath Condition="Exists('..\..\Terraria\Terraria.exe')">..\..\Terraria\Terraria.exe</TerrariaAssemblyPath>
     <TerrariaAssemblyPath Condition="'$(TerrariaAssemblyPath)' == ''">$(TerrariaInstallDir)\Terraria.exe</TerrariaAssemblyPath>
+    <HarmonyAssemblyPath Condition="Exists('..\..\Terraria\Mods\Libs\0Harmony.dll')">..\..\Terraria\Mods\Libs\0Harmony.dll</HarmonyAssemblyPath>
+    <HarmonyAssemblyPath Condition="'$(HarmonyAssemblyPath)' == '' and Exists('$(TerrariaInstallDir)\Mods\Libs\0Harmony.dll')">$(TerrariaInstallDir)\Mods\Libs\0Harmony.dll</HarmonyAssemblyPath>
+    <HarmonyAssemblyPath Condition="'$(HarmonyAssemblyPath)' == '' and Exists('$(NuGetPackageRoot)lib.harmony\2.3.3\lib\net48\0Harmony.dll')">$(NuGetPackageRoot)lib.harmony\2.3.3\lib\net48\0Harmony.dll</HarmonyAssemblyPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -20,8 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="0Harmony">
-      <HintPath>..\..\Terraria\Mods\Libs\0Harmony.dll</HintPath>
+    <Reference Include="0Harmony" Condition="Exists('$(HarmonyAssemblyPath)')">
+      <HintPath>$(HarmonyAssemblyPath)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Terraria" Condition="Exists('$(TerrariaAssemblyPath)')">
