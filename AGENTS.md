@@ -48,6 +48,27 @@ There is currently no dedicated automated test project. Validate changes with ma
 
 When adding pure logic components, prefer introducing small unit-testable classes and (if feasible) a `tests/` project.
 
+## Inspecting Terraria Classes (Reflection & Decompilation)
+When behavior is unclear, inspect Terraria internals before implementing hooks or patches.
+
+- Prefer decompilation first for API discovery:
+  - Open `Terraria.exe` (and related game assemblies) in ILSpy or dnSpy.
+  - Confirm type names, namespaces, member signatures, visibility, and call flow.
+  - Check for version-specific differences before relying on any method/field.
+- Use runtime reflection to verify assumptions in the live game process:
+  - Query `Type.GetType(...)`/`Assembly.GetType(...)` and log resolved members.
+  - Use `BindingFlags` explicitly (`Public`/`NonPublic`, `Instance`/`Static`) when probing fields or methods.
+  - Add null checks and defensive guards so missing members fail gracefully with clear logs.
+- Cross-check decompiled findings with runtime behavior:
+  - Validate invocation timing (for example, update loop vs draw loop) and side effects.
+  - Confirm argument/state expectations with targeted debug logging.
+- Keep inspection utilities isolated:
+  - Put temporary reflection probes behind debug flags and remove them before release.
+  - Do not commit one-off dump scripts/log spam unless they are intentionally reusable tooling.
+- Document non-obvious discoveries:
+  - For any fragile/private API dependency, add a brief code comment describing the inspected member and expected Terraria version.
+  - Include reproduction notes in PRs when a fix depends on decompiled or reflected internals.
+
 ## Commit & Pull Request Guidelines
 Recent history is mostly release-style commits (for example, `v0.1.0`). For normal development commits, use clear, scoped messages (example: `StorageHub: fix recursive craft refresh`).
 
