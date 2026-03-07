@@ -150,6 +150,7 @@ namespace StorageHub.Relay
         /// <summary>
         /// Filter a list of item snapshots to only include items that are within range.
         /// Items from inventory/banks (SourceChestIndex &lt; 0) are always included.
+        /// Storage-drive encoded source indices are decoded to world tile coordinates.
         /// </summary>
         public List<ItemSnapshot> FilterItemsByRange(List<ItemSnapshot> items)
         {
@@ -162,6 +163,14 @@ namespace StorageHub.Relay
                 if (item.SourceChestIndex < 0)
                 {
                     result.Add(item);
+                    continue;
+                }
+
+                // Storage drive source (encoded tile position) — check range by decoded drive tile.
+                if (SourceIndex.TryDecodeStorageDriveIndex(item.SourceChestIndex, out int driveX, out int driveY))
+                {
+                    if (IsInRange(driveX, driveY))
+                        result.Add(item);
                     continue;
                 }
 
