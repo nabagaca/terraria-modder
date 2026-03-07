@@ -59,6 +59,9 @@ namespace StorageHub
         private ModContext _context;
         private bool _enabled;
         private bool _dedicatedBlocksOnly;
+        private const int MaxDeferredPlaceableRefreshTicks = 600;
+        private bool _pendingPlaceableItemRefresh;
+        private int _deferredPlaceableRefreshTicks;
 
         // Configuration
         private StorageHubConfig _hubConfig;
@@ -332,6 +335,8 @@ namespace StorageHub
             // Update UI
             _ui?.Update();
             _recipeUi?.Update();
+
+            ProcessDeferredPlaceableItemRefresh();
         }
 
         private void OnDraw()
@@ -382,7 +387,8 @@ namespace StorageHub
 
                 EnsureDedicatedTileTypesResolved();
                 DedicatedBlocksManager.ResolvePlaceableItemTiles(_log);
-                RefreshPlaceableItemInstances();
+                _pendingPlaceableItemRefresh = !RefreshPlaceableItemInstances();
+                _deferredPlaceableRefreshTicks = 0;
 
                 // Initialize storage provider
                 _storageProvider = new SingleplayerProvider(_log, _registry, _hubConfig, _driveStorage, _dedicatedBlocksOnly);
@@ -434,6 +440,9 @@ namespace StorageHub
         public void OnWorldUnload()
         {
             if (!_enabled) return;
+
+            _pendingPlaceableItemRefresh = false;
+            _deferredPlaceableRefreshTicks = 0;
 
             try
             {
@@ -2169,14 +2178,34 @@ namespace StorageHub
             }
         }
 
-        private void RefreshPlaceableItemInstances()
+        private void ProcessDeferredPlaceableItemRefresh()
+        {
+            if (!_pendingPlaceableItemRefresh)
+                return;
+
+            if (RefreshPlaceableItemInstances())
+            {
+                _pendingPlaceableItemRefresh = false;
+                _deferredPlaceableRefreshTicks = 0;
+                return;
+            }
+
+            _deferredPlaceableRefreshTicks++;
+            if (_deferredPlaceableRefreshTicks >= MaxDeferredPlaceableRefreshTicks)
+            {
+                _pendingPlaceableItemRefresh = false;
+                _log?.Warn("[StorageHub] Timed out refreshing placeable item instances after tile runtime resolution");
+            }
+        }
+
+        private bool RefreshPlaceableItemInstances()
         {
             try
             {
                 var player = GetLocalPlayer();
                 var inventory = _playerInventoryField?.GetValue(player) as Array;
                 if (inventory == null || _itemTypeField == null || _itemStackField == null)
-                    return;
+                    return false;
 
                 var placeableTypes = new HashSet<int>();
                 foreach (string itemId in DedicatedBlocksManager.GetPlaceableItemIds())
@@ -2187,36 +2216,103 @@ namespace StorageHub
                 }
 
                 if (placeableTypes.Count == 0)
-                    return;
+                    return true;
 
-                int refreshed = 0;
-                for (int i = 0; i < inventory.Length; i++)
-                {
-                    var item = inventory.GetValue(i);
-                    if (item == null)
-                        continue;
-
-                    int type = GetSafeInt(_itemTypeField, item, 0);
-                    if (!placeableTypes.Contains(type))
-                        continue;
-
-                    int stack = GetSafeInt(_itemStackField, item, 0);
-                    int prefix = GetSafeInt(_itemPrefixField, item, 0);
-                    if (!InvokeItemSetDefaults(item, type))
-                        continue;
-
-                    _itemStackField?.SetValue(item, stack);
-                    SetItemPrefix(item, prefix);
-                    refreshed++;
-                }
+                int refreshed = RefreshPlaceableItemsInArray(inventory, placeableTypes);
+                refreshed += RefreshPlaceableMouseItem(placeableTypes);
+                refreshed += RefreshPlaceableBankItems(player, placeableTypes);
 
                 if (refreshed > 0)
                     _log?.Info($"[StorageHub] Refreshed {refreshed} placeable item instances after tile runtime resolution");
+
+                return true;
             }
             catch (Exception ex)
             {
                 _log?.Warn($"[StorageHub] Failed to refresh placeable item instances: {ex.Message}");
+                return false;
             }
+        }
+
+        private int RefreshPlaceableItemsInArray(Array items, HashSet<int> placeableTypes)
+        {
+            if (items == null || placeableTypes == null || placeableTypes.Count == 0)
+                return 0;
+
+            int refreshed = 0;
+            for (int i = 0; i < items.Length; i++)
+            {
+                var item = items.GetValue(i);
+                if (TryRefreshPlaceableItem(item, placeableTypes))
+                    refreshed++;
+            }
+
+            return refreshed;
+        }
+
+        private int RefreshPlaceableMouseItem(HashSet<int> placeableTypes)
+        {
+            if (placeableTypes == null || placeableTypes.Count == 0)
+                return 0;
+
+            var mouseItem = GetMouseItem();
+            return TryRefreshPlaceableItem(mouseItem, placeableTypes) ? 1 : 0;
+        }
+
+        private int RefreshPlaceableBankItems(object player, HashSet<int> placeableTypes)
+        {
+            if (player == null || placeableTypes == null || placeableTypes.Count == 0)
+                return 0;
+
+            int refreshed = 0;
+            refreshed += RefreshPlaceableItemsInContainer(player, "bank", placeableTypes);
+            refreshed += RefreshPlaceableItemsInContainer(player, "bank2", placeableTypes);
+            refreshed += RefreshPlaceableItemsInContainer(player, "bank3", placeableTypes);
+            refreshed += RefreshPlaceableItemsInContainer(player, "bank4", placeableTypes);
+            return refreshed;
+        }
+
+        private int RefreshPlaceableItemsInContainer(object player, string containerFieldName, HashSet<int> placeableTypes)
+        {
+            if (player == null || string.IsNullOrEmpty(containerFieldName))
+                return 0;
+
+            try
+            {
+                var playerType = player.GetType();
+                var containerField = playerType.GetField(containerFieldName, BindingFlags.Public | BindingFlags.Instance);
+                var container = containerField?.GetValue(player);
+                if (container == null)
+                    return 0;
+
+                var containerType = container.GetType();
+                var itemsField = containerType.GetField("item", BindingFlags.Public | BindingFlags.Instance);
+                var items = itemsField?.GetValue(container) as Array;
+                return RefreshPlaceableItemsInArray(items, placeableTypes);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private bool TryRefreshPlaceableItem(object item, HashSet<int> placeableTypes)
+        {
+            if (item == null || placeableTypes == null || placeableTypes.Count == 0)
+                return false;
+
+            int type = GetSafeInt(_itemTypeField, item, 0);
+            if (!placeableTypes.Contains(type))
+                return false;
+
+            int stack = GetSafeInt(_itemStackField, item, 0);
+            int prefix = GetSafeInt(_itemPrefixField, item, 0);
+            if (!InvokeItemSetDefaults(item, type))
+                return false;
+
+            _itemStackField?.SetValue(item, stack);
+            SetItemPrefix(item, prefix);
+            return true;
         }
 
         private int GetSafeInt(FieldInfo field, object obj, int defaultValue)
