@@ -305,6 +305,19 @@ namespace TerrariaModder.Core
 
         #endregion
 
+        #region Browser Launch
+
+        /// <summary>
+        /// Open an absolute HTTP or HTTPS URL in the user's default browser.
+        /// Client-only. Throws if called on a dedicated server or if the URL is invalid.
+        /// </summary>
+        public void OpenUrl(string url)
+        {
+            BrowserLauncher.OpenUrl(url, Logger, IsServer);
+        }
+
+        #endregion
+
         // ChestLoot removed in v3 — world chest items are handled via save interception
     }
 }

@@ -192,6 +192,19 @@ Keybind myKeybind = context.GetKeybind("toggle");
 IEnumerable<Keybind> allMyKeybinds = context.GetKeybinds();
 ```
 
+### External Browser Launch
+
+```csharp
+context.OpenUrl("https://terraria.wiki.gg/wiki/Terraria_Wiki");
+```
+
+`OpenUrl()` is intentionally strict:
+
+- Only absolute `http://` and `https://` URLs are accepted.
+- The framework uses the operating system shell as the only launch path.
+- Calling it on a dedicated server throws `InvalidOperationException`.
+- Invalid URLs throw immediately instead of falling back to another handler.
+
 ## ILogger
 
 Per-mod logger that writes to the shared log file:
