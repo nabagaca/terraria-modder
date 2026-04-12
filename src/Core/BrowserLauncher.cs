@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using TerrariaModder.Core.Logging;
 
 namespace TerrariaModder.Core
@@ -28,16 +29,25 @@ namespace TerrariaModder.Core
 
             try
             {
+                // Pass the URL as an argument to a fixed, known system launcher rather than
+                // as a FileName with UseShellExecute=true, which would treat user-supplied
+                // text as a shell command and is a potential code-execution vector.
+                string launcher;
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    launcher = "explorer.exe";
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    launcher = "open";
+                else
+                    launcher = "xdg-open"; // Linux / BSD
+
                 var startInfo = new ProcessStartInfo
                 {
-                    FileName = uri.AbsoluteUri,
-                    UseShellExecute = true,
+                    FileName = launcher,
+                    Arguments = uri.AbsoluteUri,
+                    UseShellExecute = false,
                 };
 
-                var process = Process.Start(startInfo);
-                if (process == null)
-                    throw new InvalidOperationException($"The operating system did not launch a browser for '{uri.AbsoluteUri}'.");
-
+                Process.Start(startInfo);
                 logger.Debug($"Opened external URL: {uri.AbsoluteUri}");
             }
             catch (Exception ex)
